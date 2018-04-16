@@ -1,6 +1,6 @@
 # OPC Simple
 
-OPC java interop made simple by[Hurence](https://www.hurence.com).
+OPC java interop made simple by [Hurence](https://www.hurence.com).
 
 This project is based on OpenSCADA UtGard and aims to provide you an easy to use java library harmonizing both
 OPC-DA and OPC-UA standards.
