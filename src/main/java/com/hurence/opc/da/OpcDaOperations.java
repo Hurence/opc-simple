@@ -164,7 +164,7 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
             syncIO = group.getSyncIO();
         } catch (Exception e) {
             try {
-                cleanup();
+                disconnect();
             } finally {
                 throw new OpcException("Unexpected exception occurred while connecting", e);
             }

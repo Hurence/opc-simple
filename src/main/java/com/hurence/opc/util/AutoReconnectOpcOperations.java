@@ -73,12 +73,16 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
             executorService = Executors.newSingleThreadExecutor();
             shouldKeepAlive = true;
             executorService.execute(() -> {
-                while (awaitDisconnected()) {
+                while (shouldKeepAlive) {
+                    if (getConnectionState() == ConnectionState.CONNECTED) {
+                        awaitDisconnected();
+                    }
                     if (shouldKeepAlive) {
                         logger.info("Detected disconnection. Triggering reconnection");
                         try {
                             connect(connectionProfile);
-                        }  catch (OpcException e) {
+                            awaitConnected();
+                        }  catch (Exception e) {
                             logger.warn("Error while reconnecting. Retrying in 1 second", e);
                             try {
                                 Thread.sleep(1000);

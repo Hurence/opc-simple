@@ -96,7 +96,6 @@ public class OpcDaOperationsTest {
     public void testAutoReconnect() throws Exception {
         AutoReconnectOpcOperations autoReconnectOpcOperations = new AutoReconnectOpcOperations(opcDaOperations);
         opcDaOperations.disconnect();
-
         autoReconnectOpcOperations.connect(connectionProfile);
         Assert.assertTrue(autoReconnectOpcOperations.awaitConnected());
         //force disconnect
