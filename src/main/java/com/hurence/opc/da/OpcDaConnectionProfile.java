@@ -37,12 +37,7 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
      * The domain name.
      */
     private String domain;
-    /**
-     * The item requested refresh period in milliseconds. The server may not support as low as you set.
-     * In this case the value will be refreshed at the server rate.
-     * If you need a very low refresh delay, please consider use direct read mode.
-     */
-    private long refreshPeriodMillis = 1000; // defaults to 1 second
+
     /**
      * The user name.
      */
@@ -51,19 +46,6 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
      * The password to authenticate the user on the provided domain.
      */
     private String password;
-    /**
-     * If set, server cache will be ignored and the value will be read directly from the device. Defaults to false.
-     */
-    private boolean directRead;
-
-
-    public boolean isDirectRead() {
-        return directRead;
-    }
-
-    public void setDirectRead(boolean directRead) {
-        this.directRead = directRead;
-    }
 
     public String getUser() {
         return user;
@@ -105,16 +87,6 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
         this.domain = domain;
     }
 
-    public long getRefreshPeriodMillis() {
-        return refreshPeriodMillis;
-    }
-
-    public void setRefreshPeriodMillis(long refreshPeriodMillis) {
-        if (refreshPeriodMillis <= 0) {
-            throw new IllegalArgumentException("refreshPeriodMillis must be any non-negative value ");
-        }
-        this.refreshPeriodMillis = refreshPeriodMillis;
-    }
 
     public OpcDaConnectionProfile withComClsId(String comClsId) {
         setComClsId(comClsId);
@@ -131,10 +103,6 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
         return this;
     }
 
-    public OpcDaConnectionProfile withRefreshPeriodMillis(long refreshPeriodMillis) {
-        setRefreshPeriodMillis(refreshPeriodMillis);
-        return this;
-    }
 
     public OpcDaConnectionProfile withUser(String user) {
         setUser(user);
@@ -146,10 +114,6 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
         return this;
     }
 
-    public OpcDaConnectionProfile withDirectRead(boolean directRead) {
-        setDirectRead(directRead);
-        return this;
-    }
 
     @Override
     public String toString() {
@@ -157,10 +121,8 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
                 "comClsId='" + comClsId + '\'' +
                 ", comProgId='" + comProgId + '\'' +
                 ", domain='" + domain + '\'' +
-                ", refreshPeriodMillis=" + refreshPeriodMillis +
                 ", user='" + user + '\'' +
                 ", password='**********'" +
-                ", directRead='" + directRead + '\'' +
                 '}';
     }
 }

@@ -18,14 +18,13 @@
 package com.hurence.opc;
 
 import java.util.Collection;
-import java.util.stream.Stream;
 
 /**
  * Base Interface to describe OPC releated operations
  *
  * @author amarziali
  */
-public interface OpcOperations<T extends ConnectionProfile<T>, U extends OpcData> {
+public interface OpcOperations<T extends ConnectionProfile, U extends SessionProfile, V extends OpcSession> {
 
     /**
      * Establish a connection to an OPC server.
@@ -53,34 +52,26 @@ public interface OpcOperations<T extends ConnectionProfile<T>, U extends OpcData
      *
      * @return a never null {@link Collection}
      */
-    Collection<String> browseTags();
+    Collection<OpcTagInfo> browseTags();
+
 
     /**
-     * Synchronously reads a list of tags and return as soon as possible.
-     * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
+     * Create a new {@link OpcSession} and attach to the current connection.
+     * The session needs then to be released. See {@link OpcOperations#releaseSession(OpcSession)}
      *
-     * @param tags the list of tags.
-     * @return the values that have been read.
+     * @param sessionProfile the information about the session to be created.
+     * @return the session.
      */
-    Collection<U> read(String... tags);
+    V createSession(U sessionProfile);
+
 
     /**
-     * Synchronously writes a list of tags and return as soon as possible.
-     * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
+     * Clear up the session and detatch it from the current session.
      *
-     * @param data the data to be written.
-     * @return true if operation is successful, false otherwise
+     * @param session the session to be destroyed.
      */
-    boolean write(U... data);
+    void releaseSession(V session);
 
-    /**
-     * Continuously read a stream of tags.
-     * May throw {@link com.hurence.opc.exception.OpcException} in case of issues. In this case the streaming will be interrupted.
-     *
-     * @param tags the tags to be read.
-     * @return a java {@link Stream}.
-     */
-    Stream<U> stream(String... tags);
 
     /**
      * Wait until the connection has been established.

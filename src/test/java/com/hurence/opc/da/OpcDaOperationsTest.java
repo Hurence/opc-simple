@@ -18,6 +18,7 @@
 package com.hurence.opc.da;
 
 import com.hurence.opc.OpcData;
+import com.hurence.opc.OpcTagInfo;
 import com.hurence.opc.util.AutoReconnectOpcOperations;
 import org.jinterop.dcom.core.JIVariant;
 import org.junit.*;
@@ -27,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 
 /**
  * E2E test. You can run by spawning an OPC-DA test server and changing connection parameters to target it.
@@ -43,15 +45,13 @@ public class OpcDaOperationsTest {
 
 
     @Before
-    public void init() throws Exception {
+    public void init() {
         opcDaOperations = new OpcDaOperations();
         connectionProfile = new OpcDaConnectionProfile()
                 .withComClsId("F8582CF2-88FB-11D0-B850-00C0F0104305")
                 .withDomain("OPC-9167C0D9342")
                 .withUser("OPC")
                 .withPassword("opc")
-                .withRefreshPeriodMillis(50)
-                .withDirectRead(true)
                 .withHost("192.168.56.101")
                 .withSocketTimeout(Duration.of(1, ChronoUnit.SECONDS));
 
@@ -67,6 +67,7 @@ public class OpcDaOperationsTest {
         opcDaOperations.awaitDisconnected();
     }
 
+
     @Test
     public void testBrowseTags() {
         logger.info("Received following tags {}", opcDaOperations.browseTags());
@@ -74,22 +75,87 @@ public class OpcDaOperationsTest {
 
     @Test
     public void listenToTags() {
-        opcDaOperations.stream("Read Error.Int4", "Square Waves.Real8").forEach(System.out::println);
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshPeriodMillis(300);
+        OpcDaSession session = null;
+
+        try {
+            session = opcDaOperations.createSession(sessionProfile);
+            session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+                    .limit(20)
+                    .forEach(System.out::println);
+
+        } finally {
+            opcDaOperations.releaseSession(session);
+        }
+    }
+
+
+    @Test
+    public void listenToArray() {
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshPeriodMillis(300);
+        OpcDaSession session = null;
+
+        try {
+            session = opcDaOperations.createSession(sessionProfile);
+            session.stream("Random.ArrayOfString")
+                    .limit(20)
+                    .map(a -> Arrays.toString((String[]) a.getValue()))
+                    .forEach(System.out::println);
+
+        } finally {
+            opcDaOperations.releaseSession(session);
+        }
     }
 
     @Test
     public void listenToAll() {
-        opcDaOperations.stream(opcDaOperations.browseTags().stream().toArray(a -> new String[a])).forEach(System.out::println);
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshPeriodMillis(300);
+        OpcDaSession session = null;
+
+        try {
+            session = opcDaOperations.createSession(sessionProfile);
+            session.stream(opcDaOperations.browseTags().stream().map(OpcTagInfo::getName).toArray(a -> new String[a]))
+                    .limit(100)
+                    .forEach(System.out::println);
+        } finally {
+            opcDaOperations.releaseSession(session);
+        }
     }
 
     @Test
     public void testWriteValues() {
-        Assert.assertTrue(opcDaOperations.write(new OpcData("Square Waves.Real8", Instant.now(), 120, JIVariant.makeVariant(123.31))));
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshPeriodMillis(300);
+        OpcDaSession session = null;
+
+        try {
+            session = opcDaOperations.createSession(sessionProfile);
+            Assert.assertTrue(session.write(new OpcData("Square Waves.Real8", Instant.now(), 120,123.31)));
+        } finally {
+            opcDaOperations.releaseSession(session);
+        }
     }
 
     @Test
     public void testWriteValuesFails() {
-        Assert.assertFalse(opcDaOperations.write(new OpcData("Square Waves.Real8", Instant.now(), 120, JIVariant.makeVariant("I'm not a number"))));
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshPeriodMillis(300);
+        OpcDaSession session = null;
+
+        try {
+            session = opcDaOperations.createSession(sessionProfile);
+            Assert.assertFalse(session.write(new OpcData("Square Waves.Real8", Instant.now(), 120, "I'm not a number")));
+        } finally {
+            opcDaOperations.releaseSession(session);
+        }
     }
 
     @Test

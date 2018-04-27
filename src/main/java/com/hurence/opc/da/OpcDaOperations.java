@@ -18,21 +18,20 @@
 package com.hurence.opc.da;
 
 import com.hurence.opc.ConnectionState;
-import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcOperations;
+import com.hurence.opc.OpcTagInfo;
+import com.hurence.opc.OpcTagProperty;
 import com.hurence.opc.exception.OpcException;
 import org.jinterop.dcom.common.JIException;
 import org.jinterop.dcom.core.*;
 import org.openscada.opc.dcom.common.KeyedResult;
-import org.openscada.opc.dcom.common.KeyedResultSet;
-import org.openscada.opc.dcom.common.Result;
-import org.openscada.opc.dcom.common.ResultSet;
 import org.openscada.opc.dcom.common.impl.EnumString;
-import org.openscada.opc.dcom.da.*;
-import org.openscada.opc.dcom.da.impl.OPCGroupStateMgt;
-import org.openscada.opc.dcom.da.impl.OPCItemMgt;
+import org.openscada.opc.dcom.da.OPCBROWSETYPE;
+import org.openscada.opc.dcom.da.OPCSERVERSTATE;
+import org.openscada.opc.dcom.da.OPCSERVERSTATUS;
+import org.openscada.opc.dcom.da.PropertyDescription;
+import org.openscada.opc.dcom.da.impl.OPCItemProperties;
 import org.openscada.opc.dcom.da.impl.OPCServer;
-import org.openscada.opc.dcom.da.impl.OPCSyncIO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,10 +39,8 @@ import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 
 /**
@@ -51,22 +48,18 @@ import java.util.stream.Stream;
  *
  * @author amarziali
  */
-public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, OpcData> {
+public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, OpcDaSessionProfile, OpcDaSession> {
 
     private static final Logger logger = LoggerFactory.getLogger(OpcDaOperations.class);
 
     private JISession session;
     private JIComServer comServer;
     private OPCServer opcServer;
-    private OPCGroupStateMgt group;
+    private OPCItemProperties opcItemProperties;
     private ScheduledExecutorService scheduler = null;
     private volatile ConnectionState connectionState = ConnectionState.DISCONNECTED;
-    private Map<String, Map.Entry<Integer, Integer>> handlesMap = new HashMap<>();
-    private AtomicInteger clientHandleCounter = new AtomicInteger();
-    private long refreshPeriodMillis;
-    private OPCSyncIO syncIO;
-    private OPCItemMgt opcItemMgt;
-    private OPCDATASOURCE datasource;
+    private final Set<OpcDaSession> sessions = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+
 
     /**
      * Atomically check a state and set next state.
@@ -123,9 +116,6 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
         if (cs != ConnectionState.DISCONNECTED) {
             throw new OpcException("There is already an active connection. Please disconnect first");
         }
-
-        this.datasource = connectionProfile.isDirectRead() ? OPCDATASOURCE.OPC_DS_DEVICE : OPCDATASOURCE.OPC_DS_CACHE;
-        this.refreshPeriodMillis = connectionProfile.getRefreshPeriodMillis();
         try {
             getStateAndSet(Optional.of(ConnectionState.CONNECTING));
             if (connectionProfile.getComClsId() != null) {
@@ -150,7 +140,7 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
 
 
             opcServer = new OPCServer(comServer.createInstance());
-
+            opcItemProperties = opcServer.getItemPropertiesService();
             scheduler = Executors.newSingleThreadScheduledExecutor();
             scheduler.scheduleWithFixedDelay(() -> {
                 checkAlive();
@@ -158,17 +148,12 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
             }, 0, 1, TimeUnit.SECONDS);
 
 
-            group = opcServer.addGroup(null, true, (int) connectionProfile.getRefreshPeriodMillis(),
-                    0, null, null, 0);
-            opcItemMgt = group.getItemManagement();
-            syncIO = group.getSyncIO();
         } catch (Exception e) {
             try {
                 disconnect();
             } finally {
                 throw new OpcException("Unexpected exception occurred while connecting", e);
             }
-
         }
 
     }
@@ -190,6 +175,15 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
         if (scheduler != null) {
             scheduler.shutdown();
         }
+        while (!sessions.isEmpty()) {
+            try {
+                OpcDaSession s = sessions.stream().findFirst().get();
+                sessions.remove(s);
+                s.cleanup(opcServer);
+            } catch (Exception e) {
+                logger.warn("Group not properly released", e);
+            }
+        }
         try {
             JISession.destroySession(session);
             logger.info("Session properly cleaned up");
@@ -197,17 +191,11 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
         } catch (JIException e) {
             throw new OpcException("Unable to properly destroy dcom session", e);
         } finally {
+            opcItemProperties = null;
             comServer = null;
             session = null;
             opcServer = null;
-            if (handlesMap != null) {
-                handlesMap.clear();
-            }
-            handlesMap = null;
-            group = null;
-            opcItemMgt = null;
             scheduler = null;
-            syncIO = null;
         }
     }
 
@@ -216,15 +204,54 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
         return getStateAndSet(Optional.empty());
     }
 
+    private String groupFromName(String tag) {
+        int idx = tag.lastIndexOf('.');
+        if (idx > 0) {
+            return tag.substring(0, idx);
+        }
+        return "";
+    }
+
+    private String toggleNullTermination(String orig) {
+        if (orig.endsWith("\u0000")) {
+            return orig.substring(0, orig.length() - 1);
+        }
+        return orig;
+    }
+
     @Override
-    public Collection<String> browseTags() {
+    public Collection<OpcTagInfo> browseTags() {
         if (getConnectionState() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to browse tags. Not connected!");
         }
         try {
             EnumString res = opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_FLAT, "", 0, JIVariant.VT_EMPTY);
             if (res != null) {
-                return res.asCollection();
+                return res.asCollection().stream()
+                        .map(s -> {
+                            OpcTagInfo ret;
+                            try {
+                                ret = new OpcTagInfo().withName(s).withGroup(groupFromName(s));
+
+                                Map<Integer, PropertyDescription> properties = opcItemProperties.queryAvailableProperties(s)
+                                        .stream().collect(Collectors.toMap(PropertyDescription::getId, Function.identity()));
+
+                                for (KeyedResult<Integer, JIVariant> result : opcItemProperties.getItemProperties(s, properties.keySet().stream().mapToInt(Integer::intValue).toArray())) {
+                                    if (result.getKey() == 1) {
+                                        ret.setType(JIVariantMarshaller.findJavaClass(result.getValue().getObjectAsShort()));
+                                    }
+                                    ret.addProperty(new OpcTagProperty(result.getKey().toString(),
+                                            toggleNullTermination(properties.get(result.getKey()).getDescription()),
+                                            JIVariantMarshaller.toJavaType(result.getValue())));
+                                }
+
+                            } catch (JIException e) {
+                                throw new OpcException("Unable to fetch metadata for tag " + s, e);
+                            }
+                            return ret;
+
+                        }).collect(Collectors.toList());
+
             }
         } catch (Exception e) {
             throw new OpcException("Unable to browse tags", e);
@@ -234,74 +261,24 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
     }
 
     @Override
-    public Collection<OpcData> read(String... tags) {
+    public OpcDaSession createSession(OpcDaSessionProfile sessionProfile) {
         if (getConnectionState() != ConnectionState.CONNECTED) {
-            throw new OpcException("Unable to read tags. Not connected!");
+            throw new OpcException("Unable to create a session. Not connected!");
         }
-        Map<String, Map.Entry<Integer, Integer>> tagsHandles =
-                Arrays.stream(tags).collect(Collectors.toMap(Function.identity(), this::resolveItemHandles));
-        Map<Integer, String> mapsToClientHandles = tagsHandles.entrySet().stream()
-                .collect(Collectors.toMap(e -> e.getValue().getValue(), e -> e.getKey()));
-        KeyedResultSet<Integer, OPCITEMSTATE> result;
-        try {
-            result = syncIO.read(datasource, tagsHandles.values().stream().map(Map.Entry::getKey).toArray(a -> new Integer[a]));
-        } catch (JIException e) {
-            throw new OpcException("Unable to read tags", e);
-        }
-
-
-        return result.stream()
-                .map(KeyedResult::getValue)
-                .map(value -> new OpcData(mapsToClientHandles.get(value.getClientHandle()),
-                        value.getTimestamp().asBigDecimalCalendar().toInstant(),
-                        value.getQuality(), value.getValue()))
-                .collect(Collectors.toList());
-    }
-
-    @Override
-    public boolean write(OpcData... data) {
-        try {
-            ResultSet<WriteRequest> result = syncIO.write(Arrays.stream(data)
-                    .map(d -> new WriteRequest(resolveItemHandles(d.getTag()).getKey(), d.getValue()))
-                    .toArray(a -> new WriteRequest[a]));
-            if (result != null) {
-                boolean failed = result.stream().anyMatch(Result::isFailed);
-                if (failed) {
-                    result.stream().filter(Result::isFailed).forEach(f -> logger.warn("Error {} writing tag handle {}", f.getErrorCode(), f.getValue().getServerHandle()));
-                    return false;
-                }
-            }
-            return true;
-        } catch (Exception e) {
-            throw new OpcException("Unable to write data", e);
-        }
+        OpcDaSession ret = OpcDaSession.create(opcServer, sessionProfile.getRefreshPeriodMillis(), sessionProfile.isDirectRead());
+        sessions.add(ret);
+        return ret;
 
     }
 
     @Override
-    public Stream<OpcData> stream(String... tags) {
-        final ArrayList<OpcData> readItems = new ArrayList<>();
-        final long lastTimeStamp[] = {0L};
-        return Stream.generate(() -> {
-            if (readItems.isEmpty()) {
-                try {
-
-                    long toSleep = refreshPeriodMillis - (System.currentTimeMillis() - lastTimeStamp[0]);
-                    if (toSleep > 0) {
-                        Thread.sleep(toSleep);
-                    }
-                    readItems.addAll(read(tags));
-                    lastTimeStamp[0] = System.currentTimeMillis();
-
-                } catch (InterruptedException ie) {
-                    throw new OpcException("Stream interrupted", ie);
-                } catch (Exception e) {
-                    throw new OpcException("EOF reading tags. Disconnected", e);
-                }
-            }
-            return readItems.size() > 0 ? readItems.remove(0) : null;
-        });
+    public void releaseSession(OpcDaSession session) {
+        if (getConnectionState() == ConnectionState.CONNECTED && session != null) {
+            sessions.remove(session);
+            session.cleanup(opcServer);
+        }
     }
+
 
     @Override
     public boolean awaitConnected() {
@@ -317,7 +294,7 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
 
     @Override
     public boolean awaitDisconnected() {
-        while (getConnectionState() != ConnectionState.DISCONNECTED){
+        while (getConnectionState() != ConnectionState.DISCONNECTED) {
             try {
                 Thread.sleep(100);
             } catch (InterruptedException e) {
@@ -325,31 +302,6 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
             }
         }
         return true;
-    }
-
-    /**
-     * Resolve tag names into server/client couple of Integer handles looking in a local cache to avoid resolving several time the same object.
-     *
-     * @param tag the tag to resolve.
-     * @return a couple of Integers. First is the server handle. Second is the client handle.
-     */
-    private synchronized Map.Entry<Integer, Integer> resolveItemHandles(String tag) {
-        Map.Entry<Integer, Integer> handles = handlesMap.get(tag);
-        if (handles == null) {
-            OPCITEMDEF opcitemdef = new OPCITEMDEF();
-            opcitemdef.setActive(true);
-            opcitemdef.setClientHandle(clientHandleCounter.incrementAndGet());
-            opcitemdef.setItemID(tag);
-            try {
-                Integer serverHandle = opcItemMgt.add(opcitemdef).get(0).getValue().getServerHandle();
-                handles = new AbstractMap.SimpleEntry<>(serverHandle, opcitemdef.getClientHandle());
-            } catch (Exception e) {
-                throw new OpcException("Unable to add item " + tag, e);
-            }
-
-            handlesMap.put(tag, handles);
-        }
-        return handles;
     }
 
 
