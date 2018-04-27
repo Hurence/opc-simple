@@ -21,6 +21,8 @@ import java.time.Duration;
 
 /**
  * Base class to describe opc server related properties.
+ *
+ * @author amarziali
  */
 public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
 

@@ -17,10 +17,7 @@
 
 package com.hurence.opc.util;
 
-import com.hurence.opc.ConnectionProfile;
-import com.hurence.opc.ConnectionState;
-import com.hurence.opc.OpcData;
-import com.hurence.opc.OpcOperations;
+import com.hurence.opc.*;
 import com.hurence.opc.exception.OpcException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +33,7 @@ import java.util.stream.Stream;
  *
  * @author amarziali
  */
-public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extends OpcData> implements OpcOperations<S, T> {
+public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extends SessionProfile<T>, U extends OpcSession> implements OpcOperations<S, T, U> {
 
     private static final Logger logger = LoggerFactory.getLogger(AutoReconnectOpcOperations.class);
 
@@ -54,14 +51,14 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     /**
      * Our delegate.
      */
-    private final OpcOperations<S, T> delegate;
+    private final OpcOperations<S, T, U> delegate;
 
     /**
      * Construct an instance.
      *
      * @param delegate the delegate
      */
-    public AutoReconnectOpcOperations(OpcOperations<S, T> delegate) {
+    public AutoReconnectOpcOperations(OpcOperations<S, T, U> delegate) {
         this.delegate = delegate;
     }
 
@@ -118,23 +115,18 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     }
 
     @Override
-    public Collection<String> browseTags() {
+    public Collection<OpcTagInfo> browseTags() {
         return delegate.browseTags();
     }
 
     @Override
-    public Collection<T> read(String... tags) {
-        return delegate.read(tags);
+    public U createSession(T sessionProfile) {
+        return null;
     }
 
     @Override
-    public boolean write(T... data) {
-        return delegate.write(data);
-    }
+    public void releaseSession(U session) {
 
-    @Override
-    public Stream<T> stream(String... tags) {
-        return delegate.stream(tags);
     }
 
     @Override
