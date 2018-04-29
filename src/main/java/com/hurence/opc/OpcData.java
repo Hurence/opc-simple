@@ -17,8 +17,6 @@
 
 package com.hurence.opc;
 
-import org.jinterop.dcom.core.JIVariant;
-
 import java.time.Instant;
 import java.util.Objects;
 
@@ -27,7 +25,7 @@ import java.util.Objects;
  *
  * @author amarziali
  */
-public class OpcData {
+public class OpcData<T> {
 
     public OpcData() {
     }
@@ -38,9 +36,9 @@ public class OpcData {
      * @param tag       the tag (item) name.
      * @param timestamp the timestamp of last data change.
      * @param quality   the quality of the data (set by the server depending on its caching policies.
-     * @param value     the {@link JIVariant} value.
+     * @param value     the value.
      */
-    public OpcData(String tag, Instant timestamp, int quality, JIVariant value) {
+    public OpcData(String tag, Instant timestamp, int quality, T value) {
         this.tag = tag;
         this.timestamp = timestamp;
         this.quality = quality;
@@ -61,9 +59,10 @@ public class OpcData {
      */
     private int quality;
     /**
-     * The value of the data. Can be any {@link JIVariant} allowed value.
+     * The value of the data.
      */
-    private JIVariant value;
+    private T value;
+
 
     public String getTag() {
         return tag;
@@ -89,11 +88,11 @@ public class OpcData {
         this.quality = quality;
     }
 
-    public JIVariant getValue() {
+    public T getValue() {
         return value;
     }
 
-    public void setValue(JIVariant value) {
+    public void setValue(T value) {
         this.value = value;
     }
 

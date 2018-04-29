@@ -19,6 +19,8 @@ package com.hurence.opc;
 
 /**
  * The connection state machine.
+ *
+ * @author amarziali
  */
 public enum ConnectionState {
 
