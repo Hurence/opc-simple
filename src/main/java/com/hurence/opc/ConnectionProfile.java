@@ -46,28 +46,51 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
      * Set the host and return itself.
      *
      * @param host the host.
-     * @return
+     * @return itself.
      */
     public final T withHost(String host) {
         setHost(host);
         return (T) this;
     }
 
+    /**
+     * Set the port and return itself.
+     *
+     * @param port the port number.
+     * @return itself.
+     */
     public final T withPort(int port) {
         setPort(port);
         return (T) this;
     }
 
+
+    /**
+     * Set the socket timeout and return itselg.
+     *
+     * @param socketTimeout the socket timeout.
+     * @return itself.
+     */
     public final T withSocketTimeout(Duration socketTimeout) {
         setSocketTimeout(socketTimeout);
         return (T) this;
     }
 
 
+    /**
+     * Get the global socket timeout.
+     *
+     * @return the socket timeout.
+     */
     public final Duration getSocketTimeout() {
         return socketTimeout;
     }
 
+    /**
+     * Set the global socket timeout.
+     *
+     * @param socketTimeout the max allowed timeout.
+     */
     public final void setSocketTimeout(Duration socketTimeout) {
         this.socketTimeout = socketTimeout;
     }
@@ -75,7 +98,7 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
     /**
      * Get the hostname.
      *
-     * @return
+     * @return the host.
      */
     public final String getHost() {
         return host;
@@ -93,7 +116,7 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
     /**
      * Get the port used for the connection.
      *
-     * @return
+     * @return the port number if set.
      */
     public final Integer getPort() {
         return port;
@@ -103,7 +126,7 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
     /**
      * Set the port used for the connection.
      *
-     * @param port
+     * @param port the port number (cannot be null and must be in the interval [1, 65535].
      */
     public final void setPort(Integer port) {
         if (port <= 0 || port > 65535) {

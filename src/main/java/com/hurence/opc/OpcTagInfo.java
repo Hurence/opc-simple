@@ -28,9 +28,21 @@ import java.util.Set;
  */
 public class OpcTagInfo {
 
+    /**
+     * The tag fully qualified name.
+     */
     private String name;
+    /**
+     * The Group (hierarchically separated by a dot '.' character
+     */
     private String group;
+    /**
+     * The java {@link Type} corresponding to the tag data type.
+     */
     private Type type;
+    /**
+     * The tag properties if any. See {@link OpcTagProperty} for further details.
+     */
     private Set<OpcTagProperty> properties = new HashSet<>();
 
 

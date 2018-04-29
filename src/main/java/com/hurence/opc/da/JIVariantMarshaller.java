@@ -45,9 +45,9 @@ public class JIVariantMarshaller {
     /**
      * Converts a {@link JIVariant} to Java type.
      *
-     * @param variant
-     * @return
-     * @throws JIException
+     * @param variant the variant to be converted.
+     * @return a java object
+     * @throws JIException in case of any issue.
      */
     public static Object toJavaType(JIVariant variant) throws JIException {
         int type = variant.getType();
@@ -113,9 +113,9 @@ public class JIVariantMarshaller {
     /**
      * Converts a {@link JIArray} to a Java array
      *
-     * @param jIArray
-     * @param type
-     * @return
+     * @param jIArray the array to be converted
+     * @param type    the type of array items
+     * @return an array of java objects.
      */
     public static Object[] jIArrayToJavaArray(JIArray jIArray, int type) {
 
@@ -165,9 +165,8 @@ public class JIVariantMarshaller {
     /**
      * Returns the java type corresponding to the encoded variant type.
      *
-     * @param type
-     * @return
-     * @throws JIException
+     * @param type the data type
+     * @return the matching java class
      */
     public static Class<?> findJavaClass(int type) {
         boolean isArray = false;

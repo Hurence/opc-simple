@@ -43,9 +43,9 @@ public class OpcTagProperty<T> {
     /**
      * Construct an immutable {@link OpcTagProperty}
      *
-     * @param key
-     * @param description
-     * @param value
+     * @param key the property name.
+     * @param description the detailed description.
+     * @param value the property value.
      */
     public OpcTagProperty(String key, String description, T value) {
         this.key = key;
