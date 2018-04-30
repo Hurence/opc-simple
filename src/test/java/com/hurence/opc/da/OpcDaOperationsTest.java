@@ -18,6 +18,7 @@
 package com.hurence.opc.da;
 
 import com.hurence.opc.OpcData;
+import com.hurence.opc.OpcSession;
 import com.hurence.opc.OpcTagInfo;
 import com.hurence.opc.util.AutoReconnectOpcOperations;
 import org.junit.*;
@@ -75,7 +76,21 @@ public class OpcDaOperationsTest {
     }
 
     @Test
-    public void listenToTags() {
+    public void listenToTags() throws Exception {
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshPeriodMillis(300);
+
+        try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
+             session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+                    .limit(20)
+                    .forEach(System.out::println);
+
+        }
+    }
+
+    @Test
+    public void testReadError() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
                 .withRefreshPeriodMillis(300);
@@ -83,9 +98,16 @@ public class OpcDaOperationsTest {
 
         try {
             session = opcDaOperations.createSession(sessionProfile);
-            session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
-                    .limit(20)
-                    .forEach(System.out::println);
+            OpcData<String> result = null;
+
+            int lastQuality = 0;
+            while (lastQuality < 100) {
+                result = session.read("Read Error.String").stream().findFirst().get();
+                System.out.println(result);
+                lastQuality = result.getQuality();
+            }
+            Assert.assertTrue(result.getErrorCode().isPresent());
+            System.out.println("Received error : " + result.getErrorCode().get());
 
         } finally {
             opcDaOperations.releaseSession(session);
