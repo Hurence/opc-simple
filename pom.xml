@@ -6,7 +6,7 @@
 
     <groupId>com.hurence.opc</groupId>
     <artifactId>opc-simple</artifactId>
-    <version>1.1.1</version>
+    <version>1.1.2-SNAPSHOT</version>
     <description>OPC made simple.</description>
     <url>https://github.com/Hurence/opc-simple</url>
     <organization>
