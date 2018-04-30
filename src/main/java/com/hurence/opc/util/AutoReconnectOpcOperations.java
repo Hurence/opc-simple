@@ -128,7 +128,6 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     public void releaseSession(U session) {
 
     }
-
     @Override
     public boolean awaitConnected() {
         return delegate.awaitConnected();
@@ -137,5 +136,10 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     @Override
     public boolean awaitDisconnected() {
         return delegate.awaitDisconnected();
+    }
+
+    @Override
+    public void close() throws Exception {
+        delegate.close();
     }
 }
