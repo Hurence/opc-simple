@@ -43,6 +43,21 @@ public class JIVariantMarshaller {
 
 
     /**
+     * Extract the error code from the variant result if a SCODE is present.
+     *
+     * @param variant the variant
+     * @return the error if any or null otherwise.
+     * @throws JIException in case of any issue.
+     */
+    public static Integer extractError(JIVariant variant) throws JIException {
+        if (variant.getType() == JIVariant.VT_ERROR) {
+            return variant.getObjectAsSCODE();
+        }
+        return null;
+    }
+
+
+    /**
      * Converts a {@link JIVariant} to Java type.
      *
      * @param variant the variant to be converted.
@@ -61,9 +76,8 @@ public class JIVariantMarshaller {
             switch (type) {
                 case JIVariant.VT_EMPTY:
                 case JIVariant.VT_NULL:
-                    return null;
                 case JIVariant.VT_ERROR:
-                    return Integer.valueOf(variant.getObjectAsSCODE());
+                    return null;
                 case JIVariant.VT_I1:
                     return Byte.valueOf((byte) variant.getObjectAsChar());
                 case JIVariant.VT_I2:
@@ -186,7 +200,6 @@ public class JIVariantMarshaller {
             case JIVariant.VT_INT:
             case JIVariant.VT_UI4:
             case JIVariant.VT_UINT:
-            case JIVariant.VT_ERROR:
                 return isArray ? Integer[].class : Integer.class;
             case JIVariant.VT_I8:
                 return isArray ? Long[].class : Long.class;

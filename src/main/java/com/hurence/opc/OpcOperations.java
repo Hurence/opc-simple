@@ -24,7 +24,8 @@ import java.util.Collection;
  *
  * @author amarziali
  */
-public interface OpcOperations<T extends ConnectionProfile, U extends SessionProfile, V extends OpcSession> {
+public interface OpcOperations<T extends ConnectionProfile, U extends SessionProfile, V extends OpcSession>
+        extends AutoCloseable {
 
     /**
      * Establish a connection to an OPC server.

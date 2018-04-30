@@ -44,10 +44,7 @@ Please feel free to change connection settings reflecting your real environment.
         //change with your domain
         .withDomain("OPC-DOMAIN")
         .withUser("OPC")
-        .withPassword("opc")
-        .withRefreshPeriodMillis(100)
-        //use server cache
-        .withDirectRead(false)
+        .withPassword("opc") 
         .withHost("192.168.56.101")
         .withSocketTimeout(Duration.of(1, ChronoUnit.SECONDS));
         
@@ -72,15 +69,53 @@ Assuming a connection is already in place, just browse the tags and print to std
     opcDaOperations.browseTags().foreach(System.out::println);
 ````
 
+#### Using Sessions
+
+Session are stateful abstractions sharing Connection. 
+Hence multiple session can be created per connection.
+
+Session is the main entry point for the following actions:
+
+* Read
+* Write
+* Stream
+
+
+When creating a session you should specify the default item refresh rate. 
+Depending on the OPC standard you are using, you can specify other properties (e.g. direct read from hardware for OPC-DA).
+
+Sessions should be created and released (beware leaks!) through the Connection obejct.
+An example:
+
+````java
+
+  OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+        .withDirectRead(false)
+        .withRefreshPeriodMillis(300);
+
+    try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
+        //do something useful with your session
+    }
+````
+
+> SessionProfile and OpcOperations interface extends AutoCloseable interface.
+> Hence you can use the handy *try-with-resources* syntax without taking care about destroying connection or sessions.
+
 #### Stream some tags readings
 
 Assuming a connection is already in place, just stream tags values 
 and as soon as possible print their values to stdout.
 
 ````java
+    
+    try {
+    session = opcDaOperations.createSession(sessionProfile);
+    session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+            .forEach(System.out::println);
+    } finally {
+        opcDaOperations.releaseSession(session);
+    }
 
-    opcDaOperations.stream("Read Error.Int4", "Square Waves.Real8")
-                    .forEach(System.out::println);
 
 ````
 

@@ -38,6 +38,7 @@ import org.openscada.opc.dcom.da.impl.OPCSyncIO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.ref.WeakReference;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -61,19 +62,23 @@ public class OpcDaSession implements OpcSession {
     private OPCSyncIO syncIO;
     private OPCItemMgt opcItemMgt;
     private OPCDATASOURCE datasource;
+    private final WeakReference<OpcDaOperations> creatingOperations;
 
-    private OpcDaSession(OPCGroupStateMgt group, OPCDATASOURCE datasource, long refreshPeriodMillis) throws JIException {
+    private OpcDaSession(OpcDaOperations creatingOperations, OPCGroupStateMgt group, OPCDATASOURCE datasource,
+                         long refreshPeriodMillis) throws JIException {
         this.group = group;
         this.opcItemMgt = group.getItemManagement();
         this.syncIO = group.getSyncIO();
         this.datasource = datasource;
         this.refreshPeriodMillis = refreshPeriodMillis;
+        this.creatingOperations = new WeakReference<>(creatingOperations);
     }
 
-    static OpcDaSession create(OPCServer server, long refreshPeriodMillis, boolean directRead) {
+    static OpcDaSession create(OPCServer server, long refreshPeriodMillis, boolean directRead, OpcDaOperations creatingOperations) {
         try {
-            return new OpcDaSession(server.addGroup(null, true, (int) refreshPeriodMillis,
-                    clientHandleCounter.incrementAndGet(), null, null, 0),
+            return new OpcDaSession(creatingOperations,
+                    server.addGroup(null, true,
+                            (int) refreshPeriodMillis, clientHandleCounter.incrementAndGet(), null, null, 0),
                     directRead ? OPCDATASOURCE.OPC_DS_DEVICE : OPCDATASOURCE.OPC_DS_CACHE,
                     refreshPeriodMillis);
         } catch (Exception e) {
@@ -119,9 +124,10 @@ public class OpcDaSession implements OpcSession {
                     .filter(value -> mapsToClientHandles.containsKey(value.getClientHandle()))
                     .map(value -> {
                         try {
-                            return new OpcData(mapsToClientHandles.get(value.getClientHandle()),
+                            return new OpcData<>(mapsToClientHandles.get(value.getClientHandle()),
                                     value.getTimestamp().asBigDecimalCalendar().toInstant(),
-                                    value.getQuality(), JIVariantMarshaller.toJavaType(value.getValue()));
+                                    value.getQuality(), JIVariantMarshaller.toJavaType(value.getValue()),
+                                    JIVariantMarshaller.extractError(value.getValue()));
                         } catch (JIException e) {
                             throw new OpcException("Unable to read tag " + value, e);
                         }
@@ -207,5 +213,14 @@ public class OpcDaSession implements OpcSession {
         return handles;
     }
 
-
+    @Override
+    public void close() {
+        if (creatingOperations != null && creatingOperations.get() != null) {
+            try {
+                creatingOperations.get().releaseSession(this);
+            } finally {
+                creatingOperations.clear();
+            }
+        }
+    }
 }

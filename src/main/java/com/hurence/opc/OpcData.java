@@ -19,6 +19,7 @@ package com.hurence.opc;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * OPC data model.
@@ -27,23 +28,6 @@ import java.util.Objects;
  */
 public class OpcData<T> {
 
-    public OpcData() {
-    }
-
-    /**
-     * Construct an object with parameters.
-     *
-     * @param tag       the tag (item) name.
-     * @param timestamp the timestamp of last data change.
-     * @param quality   the quality of the data (set by the server depending on its caching policies.
-     * @param value     the value.
-     */
-    public OpcData(String tag, Instant timestamp, int quality, T value) {
-        this.tag = tag;
-        this.timestamp = timestamp;
-        this.quality = quality;
-        this.value = value;
-    }
 
     /**
      * The tag (item) name.
@@ -62,6 +46,51 @@ public class OpcData<T> {
      * The value of the data.
      */
     private T value;
+
+    /**
+     * Read/Write error code. Codes are generated server side.
+     */
+    private Optional<Integer> errorCode = Optional.empty();
+
+    /**
+     * Default ctor.
+     */
+    public OpcData() {
+
+    }
+
+
+    /**
+     * Construct an object with parameters.
+     *
+     * @param tag       the tag (item) name.
+     * @param timestamp the timestamp of last data change.
+     * @param quality   the quality of the data (set by the server depending on its caching policies.
+     * @param value     the value.
+     */
+    public OpcData(String tag, Instant timestamp, int quality, T value) {
+        this.tag = tag;
+        this.timestamp = timestamp;
+        this.quality = quality;
+        this.value = value;
+    }
+
+    /**
+     * Construct an object with parameters.
+     *
+     * @param tag       the tag (item) name.
+     * @param timestamp the timestamp of last data change.
+     * @param quality   the quality of the data (set by the server depending on its caching policies.
+     * @param value     the value.
+     * @param errorCode the optional error code. Can be null.
+     */
+    public OpcData(String tag, Instant timestamp, int quality, T value, Integer errorCode) {
+        this.tag = tag;
+        this.timestamp = timestamp;
+        this.quality = quality;
+        this.value = value;
+        this.errorCode = Optional.ofNullable(errorCode);
+    }
 
 
     public String getTag() {
@@ -96,20 +125,30 @@ public class OpcData<T> {
         this.value = value;
     }
 
+    public Optional<Integer> getErrorCode() {
+        return errorCode;
+    }
+
+    public void setErrorCode(Optional<Integer> errorCode) {
+        this.errorCode = errorCode;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        OpcData opcData = (OpcData) o;
+        OpcData<?> opcData = (OpcData<?>) o;
         return quality == opcData.quality &&
                 Objects.equals(tag, opcData.tag) &&
                 Objects.equals(timestamp, opcData.timestamp) &&
-                Objects.equals(value, opcData.value);
+                Objects.equals(value, opcData.value) &&
+                Objects.equals(errorCode, opcData.errorCode);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(tag, timestamp, quality, value);
+
+        return Objects.hash(tag, timestamp, quality, value, errorCode);
     }
 
     @Override
@@ -119,6 +158,7 @@ public class OpcData<T> {
                 ", timestamp=" + timestamp +
                 ", quality=" + quality +
                 ", value=" + value +
+                ", errorCode=" + errorCode +
                 '}';
     }
 }

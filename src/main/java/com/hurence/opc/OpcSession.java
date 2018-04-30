@@ -26,7 +26,7 @@ import java.util.stream.Stream;
  *
  * @author amarziali
  */
-public interface OpcSession {
+public interface OpcSession extends AutoCloseable {
 
     /**
      * Synchronously reads a list of tags and return as soon as possible.

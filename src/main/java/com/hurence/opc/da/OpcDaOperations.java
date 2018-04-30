@@ -240,7 +240,7 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
                                     if (result.getKey() == 1) {
                                         ret.setType(JIVariantMarshaller.findJavaClass(result.getValue().getObjectAsShort()));
                                     }
-                                    ret.addProperty(new OpcTagProperty(result.getKey().toString(),
+                                    ret.addProperty(new OpcTagProperty<>(result.getKey().toString(),
                                             toggleNullTermination(properties.get(result.getKey()).getDescription()),
                                             JIVariantMarshaller.toJavaType(result.getValue())));
                                 }
@@ -265,7 +265,8 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
         if (getConnectionState() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to create a session. Not connected!");
         }
-        OpcDaSession ret = OpcDaSession.create(opcServer, sessionProfile.getRefreshPeriodMillis(), sessionProfile.isDirectRead());
+        OpcDaSession ret = OpcDaSession.create(opcServer, sessionProfile.getRefreshPeriodMillis(),
+                sessionProfile.isDirectRead(), this);
         sessions.add(ret);
         return ret;
 
@@ -304,5 +305,8 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
         return true;
     }
 
-
+    @Override
+    public void close() throws Exception {
+        disconnect();
+    }
 }
