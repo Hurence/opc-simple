@@ -18,14 +18,12 @@
 package com.hurence.opc.util;
 
 import com.hurence.opc.*;
-import com.hurence.opc.exception.OpcException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.stream.Stream;
 
 /**
  * Utility class delegating operations to a standard {@link OpcOperations} implementation but automatically reconnecting
@@ -79,7 +77,7 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
                         try {
                             connect(connectionProfile);
                             awaitConnected();
-                        }  catch (Exception e) {
+                        } catch (Exception e) {
                             logger.warn("Error while reconnecting. Retrying in 1 second", e);
                             try {
                                 Thread.sleep(1000);
@@ -121,13 +119,14 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
 
     @Override
     public U createSession(T sessionProfile) {
-        return null;
+        return delegate.createSession(sessionProfile);
     }
 
     @Override
     public void releaseSession(U session) {
-
+        delegate.releaseSession(session);
     }
+
     @Override
     public boolean awaitConnected() {
         return delegate.awaitConnected();
