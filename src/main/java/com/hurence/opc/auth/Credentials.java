@@ -17,5 +17,11 @@
 
 package com.hurence.opc.auth;
 
+/**
+ * Generic interface to be subclassed by implementations.
+ * No operations defined here
+ *
+ * @author amarziali
+ */
 public interface Credentials {
 }

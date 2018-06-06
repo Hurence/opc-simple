@@ -19,6 +19,11 @@ package com.hurence.opc.auth;
 
 import java.util.Objects;
 
+/**
+ * Username/Passaword {@link Credentials} information.
+ *
+ * @author amarziali
+ */
 public class UsernamePasswordCredentials implements Credentials {
 
     /**
