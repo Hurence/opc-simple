@@ -17,6 +17,8 @@
 
 package com.hurence.opc;
 
+import com.hurence.opc.auth.Credentials;
+
 import java.time.Duration;
 
 /**
@@ -40,6 +42,11 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
      * The timeout used to read/write.
      */
     private Duration socketTimeout;
+
+    /**
+     * The authentication credentials.
+     */
+    private Credentials credentials;
 
 
     /**
@@ -73,6 +80,18 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
      */
     public final T withSocketTimeout(Duration socketTimeout) {
         setSocketTimeout(socketTimeout);
+        return (T) this;
+    }
+
+    /**
+     * Set the {@link Credentials} to use for authentication.
+     * It can be any subclass. The connector must however support the related authentication method.
+     *
+     * @param credentials the credentials.
+     * @return itself.
+     */
+    public final T withCredentials(Credentials credentials) {
+        setCredentials(credentials);
         return (T) this;
     }
 
@@ -122,6 +141,24 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
         return port;
     }
 
+    /**
+     * Get the credentials to authenticate with.
+     *
+     * @return the {@link Credentials}
+     */
+    public Credentials getCredentials() {
+        return credentials;
+    }
+
+    /**
+     * Set the {@link Credentials} to use for authentication.
+     * It can be any subclass. The connector must however support the related authentication method.
+     *
+     * @param credentials the credentials.
+     */
+    public void setCredentials(Credentials credentials) {
+        this.credentials = credentials;
+    }
 
     /**
      * Set the port used for the connection.

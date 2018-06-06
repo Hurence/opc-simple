@@ -20,6 +20,7 @@ package com.hurence.opc.da;
 import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcSession;
 import com.hurence.opc.OpcTagInfo;
+import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.util.AutoReconnectOpcOperations;
 import org.junit.*;
 import org.slf4j.Logger;
@@ -52,9 +53,10 @@ public class OpcDaOperationsTest {
         connectionProfile = new OpcDaConnectionProfile()
                 .withComClsId("F8582CF2-88FB-11D0-B850-00C0F0104305")
                 .withDomain("OPC-9167C0D9342")
-                .withUser("OPC")
-                .withPassword("opc")
-                .withHost("192.168.56.101")
+                .withCredentials(new UsernamePasswordCredentials()
+                        .withUser("OPC")
+                        .withPassword("opc"))
+                .withHost("192.168.99.100")
                 .withSocketTimeout(Duration.of(1, ChronoUnit.SECONDS));
 
         opcDaOperations.connect(connectionProfile);
@@ -82,7 +84,7 @@ public class OpcDaOperationsTest {
                 .withRefreshPeriodMillis(300);
 
         try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
-             session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+            session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
                     .limit(20)
                     .forEach(System.out::println);
 

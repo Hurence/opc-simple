@@ -21,6 +21,8 @@ import com.hurence.opc.ConnectionState;
 import com.hurence.opc.OpcOperations;
 import com.hurence.opc.OpcTagInfo;
 import com.hurence.opc.OpcTagProperty;
+import com.hurence.opc.auth.Credentials;
+import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.exception.OpcException;
 import org.jinterop.dcom.common.JIException;
 import org.jinterop.dcom.core.*;
@@ -112,6 +114,20 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
             throw new OpcException("Please provide any valid non null connection profile");
         }
 
+        Credentials credentials = connectionProfile.getCredentials();
+
+        if (credentials != null && !(credentials instanceof UsernamePasswordCredentials)) {
+            throw new OpcException("Credentials " + credentials.getClass().getCanonicalName() +
+                    " is not supported by OPC-DA connector");
+        }
+
+        String username = null;
+        String password = null;
+
+        username = ((UsernamePasswordCredentials) credentials).getUser();
+        password = ((UsernamePasswordCredentials) credentials).getPassword();
+
+
         ConnectionState cs = getConnectionState();
         if (cs != ConnectionState.DISCONNECTED) {
             throw new OpcException("There is already an active connection. Please disconnect first");
@@ -120,7 +136,7 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
             getStateAndSet(Optional.of(ConnectionState.CONNECTING));
             if (connectionProfile.getComClsId() != null) {
                 this.session = JISession.createSession(connectionProfile.getDomain(),
-                        connectionProfile.getUser(), connectionProfile.getPassword());
+                        username, password);
                 if (connectionProfile.getSocketTimeout() != null) {
                     this.session.setGlobalSocketTimeout((int) connectionProfile.getSocketTimeout().toMillis());
                 }
@@ -128,7 +144,7 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
                         connectionProfile.getHost(), this.session);
             } else if (connectionProfile.getComProgId() != null) {
                 this.session = JISession.createSession(connectionProfile.getDomain(),
-                        connectionProfile.getUser(), connectionProfile.getPassword());
+                        username, password);
                 if (connectionProfile.getSocketTimeout() != null) {
                     this.session.setGlobalSocketTimeout((int) connectionProfile.getSocketTimeout().toMillis());
                 }
