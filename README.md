@@ -43,10 +43,11 @@ Please feel free to change connection settings reflecting your real environment.
         .withComClsId("F8582CF2-88FB-11D0-B850-00C0F0104305")
         //change with your domain
         .withDomain("OPC-DOMAIN")
-        .withUser("OPC")
-        .withPassword("opc") 
-        .withHost("192.168.56.101")
-        .withSocketTimeout(Duration.of(1, ChronoUnit.SECONDS));
+        .withCredentials(new UsernamePasswordCredentials()
+            .withUser("OPC")
+            .withPassword("opc"))
+        .withConnectionUri(new URI("opc.da://192.168.99.100"))
+        .withSocketTimeout(Duration.of(5, ChronoUnit.SECONDS));
         
     //Create an instance of a da operations
     OpcDaOperations opcDaOperations = new OpcDaOperations();
