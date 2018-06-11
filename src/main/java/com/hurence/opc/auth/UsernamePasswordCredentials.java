@@ -20,7 +20,7 @@ package com.hurence.opc.auth;
 import java.util.Objects;
 
 /**
- * Username/Passaword {@link Credentials} information.
+ * Username/Password {@link Credentials} information.
  *
  * @author amarziali
  */
@@ -80,7 +80,7 @@ public class UsernamePasswordCredentials implements Credentials {
     public String toString() {
         return "UsernamePasswordCredentials{" +
                 "user='" + user + '\'' +
-                ", password='***********'" +
+                ", password='***hidden***'" +
                 '}';
     }
 }

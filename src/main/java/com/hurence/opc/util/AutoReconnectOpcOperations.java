@@ -23,7 +23,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Utility class delegating operations to a standard {@link OpcOperations} implementation but automatically reconnecting
@@ -65,7 +64,7 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
         delegate.connect(connectionProfile);
         //if no error we'll run our keepalive loop.
         if (executorService == null) {
-            executorService = Executors.newSingleThreadExecutor();
+            executorService = SingleThreadedExecutorServiceFactory.instance().createScheduler();
             shouldKeepAlive = true;
             executorService.execute(() -> {
                 while (shouldKeepAlive) {
@@ -140,5 +139,10 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     @Override
     public void close() throws Exception {
         delegate.close();
+    }
+
+    @Override
+    public boolean isChannelSecured() {
+        return delegate.isChannelSecured();
     }
 }

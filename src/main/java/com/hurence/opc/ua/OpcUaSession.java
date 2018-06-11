@@ -15,20 +15,34 @@
  *
  */
 
-package com.hurence.opc.auth;
+package com.hurence.opc.ua;
 
-/**
- * Generic interface to be subclassed by implementations.
- * No operations defined here
- *
- * @author amarziali
- */
-public interface Credentials {
+import com.hurence.opc.OpcData;
+import com.hurence.opc.OpcSession;
 
-    /**
-     * Anonymous credentials.
-     */
-    Credentials ANONYMOUS_CREDENTIALS = new Credentials() {
-    };
+import java.util.Collection;
+import java.util.stream.Stream;
 
+public class OpcUaSession implements OpcSession {
+
+
+    @Override
+    public Collection<OpcData> read(String... tags) {
+        return null;
+    }
+
+    @Override
+    public boolean write(OpcData... data) {
+        return false;
+    }
+
+    @Override
+    public Stream<OpcData> stream(String... tags) {
+        return null;
+    }
+
+    @Override
+    public void close() throws Exception {
+
+    }
 }

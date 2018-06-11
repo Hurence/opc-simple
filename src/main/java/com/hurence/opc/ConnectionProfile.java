@@ -19,6 +19,7 @@ package com.hurence.opc;
 
 import com.hurence.opc.auth.Credentials;
 
+import java.net.URI;
 import java.time.Duration;
 
 /**
@@ -28,14 +29,8 @@ import java.time.Duration;
  */
 public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
 
-    /**
-     * The host for the connection.
-     */
-    private String host;
-    /**
-     * The port to connect to
-     */
-    private Integer port;
+
+    private URI connectionUri;
 
 
     /**
@@ -45,29 +40,20 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
 
     /**
      * The authentication credentials.
+     * <p>
+     * Defaults to {@link Credentials#ANONYMOUS_CREDENTIALS}
      */
-    private Credentials credentials;
+    private Credentials credentials = Credentials.ANONYMOUS_CREDENTIALS;
 
 
     /**
      * Set the host and return itself.
      *
-     * @param host the host.
+     * @param connectionUri the host.
      * @return itself.
      */
-    public final T withHost(String host) {
-        setHost(host);
-        return (T) this;
-    }
-
-    /**
-     * Set the port and return itself.
-     *
-     * @param port the port number.
-     * @return itself.
-     */
-    public final T withPort(int port) {
-        setPort(port);
+    public final T withConnectionUri(URI connectionUri) {
+        setConnectionUri(connectionUri);
         return (T) this;
     }
 
@@ -114,31 +100,12 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
         this.socketTimeout = socketTimeout;
     }
 
-    /**
-     * Get the hostname.
-     *
-     * @return the host.
-     */
-    public final String getHost() {
-        return host;
+    public URI getConnectionUri() {
+        return connectionUri;
     }
 
-    /**
-     * Sets the host
-     *
-     * @param host the host
-     */
-    public final void setHost(String host) {
-        this.host = host;
-    }
-
-    /**
-     * Get the port used for the connection.
-     *
-     * @return the port number if set.
-     */
-    public final Integer getPort() {
-        return port;
+    public void setConnectionUri(URI connectionUri) {
+        this.connectionUri = connectionUri;
     }
 
     /**
@@ -160,23 +127,11 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
         this.credentials = credentials;
     }
 
-    /**
-     * Set the port used for the connection.
-     *
-     * @param port the port number (cannot be null and must be in the interval [1, 65535].
-     */
-    public final void setPort(Integer port) {
-        if (port <= 0 || port > 65535) {
-            throw new IllegalArgumentException("Port value must any valid  unsigned 16 bit integer");
-        }
-        this.port = port;
-    }
 
     @Override
     public String toString() {
         return "ConnectionProfile{" +
-                "host='" + host + '\'' +
-                ", port=" + port +
+                "connectionUri='" + connectionUri + '\'' +
                 ", socketTimeout=" + socketTimeout +
                 '}';
     }

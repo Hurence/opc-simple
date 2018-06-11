@@ -26,6 +26,7 @@ import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -48,7 +49,7 @@ public class OpcDaOperationsTest {
 
 
     @Before
-    public void init() {
+    public void init() throws Exception {
         opcDaOperations = new OpcDaOperations();
         connectionProfile = new OpcDaConnectionProfile()
                 .withComClsId("F8582CF2-88FB-11D0-B850-00C0F0104305")
@@ -56,7 +57,7 @@ public class OpcDaOperationsTest {
                 .withCredentials(new UsernamePasswordCredentials()
                         .withUser("OPC")
                         .withPassword("opc"))
-                .withHost("192.168.99.100")
+                .withConnectionUri(new URI("opc.da://192.168.99.100:135"))
                 .withSocketTimeout(Duration.of(1, ChronoUnit.SECONDS));
 
         opcDaOperations.connect(connectionProfile);

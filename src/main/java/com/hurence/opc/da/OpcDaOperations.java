@@ -17,13 +17,12 @@
 
 package com.hurence.opc.da;
 
-import com.hurence.opc.ConnectionState;
-import com.hurence.opc.OpcOperations;
-import com.hurence.opc.OpcTagInfo;
-import com.hurence.opc.OpcTagProperty;
+import com.hurence.opc.*;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.exception.OpcException;
+import com.hurence.opc.util.ExecutorServiceFactory;
+import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
 import org.jinterop.dcom.common.JIException;
 import org.jinterop.dcom.core.*;
 import org.openscada.opc.dcom.common.KeyedResult;
@@ -38,7 +37,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -50,7 +48,7 @@ import java.util.stream.Collectors;
  *
  * @author amarziali
  */
-public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, OpcDaSessionProfile, OpcDaSession> {
+public class OpcDaOperations extends AbstractOpcOperations<OpcDaConnectionProfile, OpcDaSessionProfile, OpcDaSession> {
 
     private static final Logger logger = LoggerFactory.getLogger(OpcDaOperations.class);
 
@@ -59,24 +57,23 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
     private OPCServer opcServer;
     private OPCItemProperties opcItemProperties;
     private ScheduledExecutorService scheduler = null;
-    private volatile ConnectionState connectionState = ConnectionState.DISCONNECTED;
     private final Set<OpcDaSession> sessions = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
 
-
     /**
-     * Atomically check a state and set next state.
+     * Construct an instance with an {@link ExecutorServiceFactory}
      *
-     * @param next of empty won't set anything.
-     * @return
+     * @param executorServiceFactory the executor thread factory.
      */
-    private synchronized ConnectionState getStateAndSet(Optional<ConnectionState> next) {
-        ConnectionState ret = connectionState;
-        if (next.isPresent()) {
-            connectionState = next.get();
-        }
-        return ret;
+    public OpcDaOperations(ExecutorServiceFactory executorServiceFactory) {
+        super(executorServiceFactory);
     }
 
+    /**
+     * Standard constructor. Uses a single threaded worker.
+     */
+    public OpcDaOperations() {
+        this(SingleThreadedExecutorServiceFactory.instance());
+    }
 
     /**
      * Check if the underlying connection to the com server is still alive.
@@ -108,9 +105,10 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
     }
 
 
+
     @Override
     public void connect(OpcDaConnectionProfile connectionProfile) {
-        if (connectionProfile == null) {
+        if (connectionProfile == null || connectionProfile.getConnectionUri() == null) {
             throw new OpcException("Please provide any valid non null connection profile");
         }
 
@@ -134,6 +132,8 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
         }
         try {
             getStateAndSet(Optional.of(ConnectionState.CONNECTING));
+            //ugly: custom port not supported by utgard since hardcoded?
+            String connectionString = connectionProfile.getConnectionUri().getHost();
             if (connectionProfile.getComClsId() != null) {
                 this.session = JISession.createSession(connectionProfile.getDomain(),
                         username, password);
@@ -141,7 +141,7 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
                     this.session.setGlobalSocketTimeout((int) connectionProfile.getSocketTimeout().toMillis());
                 }
                 this.comServer = new JIComServer(JIClsid.valueOf(connectionProfile.getComClsId()),
-                        connectionProfile.getHost(), this.session);
+                        connectionString, this.session);
             } else if (connectionProfile.getComProgId() != null) {
                 this.session = JISession.createSession(connectionProfile.getDomain(),
                         username, password);
@@ -149,7 +149,7 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
                     this.session.setGlobalSocketTimeout((int) connectionProfile.getSocketTimeout().toMillis());
                 }
                 this.comServer = new JIComServer(JIProgId.valueOf(connectionProfile.getComProgId()),
-                        connectionProfile.getHost(), this.session);
+                        connectionString, this.session);
             } else {
                 throw new IllegalArgumentException("Neither clsid nor progid is valid!");
             }
@@ -157,7 +157,7 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
 
             opcServer = new OPCServer(comServer.createInstance());
             opcItemProperties = opcServer.getItemPropertiesService();
-            scheduler = Executors.newSingleThreadScheduledExecutor();
+            scheduler = executorServiceFactory.createScheduler();
             scheduler.scheduleWithFixedDelay(() -> {
                 checkAlive();
 
@@ -215,10 +215,6 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
         }
     }
 
-    @Override
-    public ConnectionState getConnectionState() {
-        return getStateAndSet(Optional.empty());
-    }
 
     private String groupFromName(String tag) {
         int idx = tag.lastIndexOf('.');
@@ -296,30 +292,6 @@ public class OpcDaOperations implements OpcOperations<OpcDaConnectionProfile, Op
         }
     }
 
-
-    @Override
-    public boolean awaitConnected() {
-        while (getConnectionState() != ConnectionState.CONNECTED) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    @Override
-    public boolean awaitDisconnected() {
-        while (getConnectionState() != ConnectionState.DISCONNECTED) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                return false;
-            }
-        }
-        return true;
-    }
 
     @Override
     public void close() throws Exception {

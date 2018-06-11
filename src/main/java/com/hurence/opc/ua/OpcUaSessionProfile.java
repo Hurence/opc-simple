@@ -15,20 +15,9 @@
  *
  */
 
-package com.hurence.opc.auth;
+package com.hurence.opc.ua;
 
-/**
- * Generic interface to be subclassed by implementations.
- * No operations defined here
- *
- * @author amarziali
- */
-public interface Credentials {
+import com.hurence.opc.SessionProfile;
 
-    /**
-     * Anonymous credentials.
-     */
-    Credentials ANONYMOUS_CREDENTIALS = new Credentials() {
-    };
-
+public class OpcUaSessionProfile extends SessionProfile<OpcUaSessionProfile> {
 }

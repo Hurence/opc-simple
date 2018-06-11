@@ -17,8 +17,9 @@
 
 package com.hurence.opc.auth;
 
-import java.security.KeyPair;
+import java.security.PrivateKey;
 import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.Objects;
 
 /**
@@ -30,22 +31,22 @@ import java.util.Objects;
 public class X509Credentials implements Credentials {
 
     /**
-     * The issued public X509 {@link Certificate}.
+     * The issued public X509 {@link X509Certificate}.
      */
-    private Certificate certificate;
+    private X509Certificate certificate;
 
     /**
-     * The {@link KeyPair} holding public and private keys.
+     * The {@link PrivateKey} private key.
      */
-    private KeyPair keys;
+    private PrivateKey privateKey;
 
 
     /**
-     * Get the issued public X509 {@link Certificate}.
+     * Get the issued public X509 {@link X509Certificate}.
      *
-     * @return the {@link Certificate}
+     * @return the {@link X509Certificate}
      */
-    public Certificate getCertificate() {
+    public X509Certificate getCertificate() {
         return certificate;
     }
 
@@ -54,47 +55,47 @@ public class X509Credentials implements Credentials {
      *
      * @param certificate the X509 {@link Certificate} to set
      */
-    public void setCertificate(Certificate certificate) {
+    public void setCertificate(X509Certificate certificate) {
         this.certificate = certificate;
     }
 
     /**
-     * Get the {@link KeyPair} holding public and private keys.
+     * Get the {@link PrivateKey} private key.
      *
-     * @return the keys information.
+     * @return the private key.
      */
-    public KeyPair getKeys() {
-        return keys;
+    public PrivateKey getPrivateKey() {
+        return privateKey;
     }
 
     /**
-     * Set the {@link KeyPair} holding public and private keys.
+     * Set the {@link PrivateKey} private key.
      *
-     * @param keys the keys to set.
+     * @param privateKey the private key to set.
      */
-    public void setKeys(KeyPair keys) {
-        this.keys = keys;
+    public void setPrivateKey(PrivateKey privateKey) {
+        this.privateKey = privateKey;
     }
 
     /**
-     * Set the issued public X509 {@link Certificate}.
+     * Set the issued public X509 {@link X509Certificate}.
      *
-     * @param certificate the X509 {@link Certificate} to set
+     * @param certificate the X509 {@link X509Certificate} to set
      * @return itself.
      */
-    public X509Credentials withCertificate(Certificate certificate) {
+    public X509Credentials withCertificate(X509Certificate certificate) {
         setCertificate(certificate);
         return this;
     }
 
     /**
-     * Set the {@link KeyPair} holding public and private keys.
+     * Set the {@link PrivateKey}  private key.
      *
-     * @param keys the keys to set.
+     * @param privateKey the private key to set.
      * @return itself.
      */
-    public X509Credentials withKeys(KeyPair keys) {
-        setKeys(keys);
+    public X509Credentials withPrivateKey(PrivateKey privateKey) {
+        setPrivateKey(privateKey);
         return this;
     }
 
@@ -104,19 +105,19 @@ public class X509Credentials implements Credentials {
         if (o == null || getClass() != o.getClass()) return false;
         X509Credentials that = (X509Credentials) o;
         return Objects.equals(certificate, that.certificate) &&
-                Objects.equals(keys, that.keys);
+                Objects.equals(privateKey, that.privateKey);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(certificate, keys);
+        return Objects.hash(certificate, privateKey);
     }
 
     @Override
     public String toString() {
         return "X509Credentials{" +
                 "certificate=" + certificate +
-                ", keys='****hidden****'" +
+                ", privateKey='****hidden****'" +
                 '}';
     }
 }
