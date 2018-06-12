@@ -35,6 +35,12 @@ import java.security.KeyPair;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 
+/**
+ * {@link OpcUaOperations} tests.
+ * This suite spawns a fake OPC-UA test on localhost on any free port.
+ *
+ * @author amarziali
+ */
 public class OpcUaOperationsTest {
 
     private static final Logger logger = LoggerFactory.getLogger(OpcUaOperationsTest.class);
@@ -132,6 +138,14 @@ public class OpcUaOperationsTest {
             opcUaOperations.connect(connectionProfile
                     .withCredentials(createX509Credentials(connectionProfile.getClientIdUri())));
             Assert.assertTrue(opcUaOperations.awaitConnected());
+        }
+    }
+
+    @Test
+    public void testBrowse() throws Exception {
+        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
+            opcUaOperations.connect(createConnectionProfile());
+            opcUaOperations.browseTags();
         }
     }
 

@@ -30,7 +30,7 @@ public class OpcData<T> {
 
 
     /**
-     * The tag (item) name.
+     * The tag (item) id.
      */
     private String tag;
     /**
@@ -63,7 +63,7 @@ public class OpcData<T> {
     /**
      * Construct an object with parameters.
      *
-     * @param tag       the tag (item) name.
+     * @param tag       the tag (item) id.
      * @param timestamp the timestamp of last data change.
      * @param quality   the quality of the data (set by the server depending on its caching policies.
      * @param value     the value.
@@ -78,7 +78,7 @@ public class OpcData<T> {
     /**
      * Construct an object with parameters.
      *
-     * @param tag       the tag (item) name.
+     * @param tag       the tag (item) id.
      * @param timestamp the timestamp of last data change.
      * @param quality   the quality of the data (set by the server depending on its caching policies.
      * @param value     the value.

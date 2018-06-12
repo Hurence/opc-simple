@@ -82,7 +82,7 @@ public class OpcDaOperationsTest {
     public void listenToTags() throws Exception {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
 
         try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
             session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
@@ -96,7 +96,7 @@ public class OpcDaOperationsTest {
     public void testReadError() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
@@ -122,7 +122,7 @@ public class OpcDaOperationsTest {
     public void listenToArray() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
@@ -141,12 +141,12 @@ public class OpcDaOperationsTest {
     public void listenToAll() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
             session = opcDaOperations.createSession(sessionProfile);
-            session.stream(opcDaOperations.browseTags().stream().map(OpcTagInfo::getName).toArray(a -> new String[a]))
+            session.stream(opcDaOperations.browseTags().stream().map(OpcTagInfo::getId).toArray(a -> new String[a]))
                     .limit(100)
                     .forEach(System.out::println);
         } finally {
@@ -158,7 +158,7 @@ public class OpcDaOperationsTest {
     public void testWriteValues() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
@@ -173,7 +173,7 @@ public class OpcDaOperationsTest {
     public void testWriteValuesFails() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {

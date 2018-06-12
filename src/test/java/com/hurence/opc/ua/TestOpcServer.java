@@ -120,6 +120,7 @@ public class TestOpcServer implements AutoCloseable {
                 .build();
 
         instance = new OpcUaServer(serverConfig);
+        registerSampleObjects();
         logger.info("Created OPC-UA server running on opc.tcp://{}:{}", bindAddress, bindPort);
     }
 
@@ -146,6 +147,15 @@ public class TestOpcServer implements AutoCloseable {
         }
 
     }
+
+
+    private void registerSampleObjects() throws Exception {
+
+        instance.getNamespaceManager().registerAndAdd(TestNamespace.URI, uShort -> new TestNamespace(uShort, instance));
+
+
+    }
+
 
     public OpcUaServer getInstance() {
         return instance;

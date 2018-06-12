@@ -26,6 +26,7 @@ import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
 import org.jinterop.dcom.common.JIException;
 import org.jinterop.dcom.core.*;
 import org.openscada.opc.dcom.common.KeyedResult;
+import org.openscada.opc.dcom.common.KeyedResultSet;
 import org.openscada.opc.dcom.common.impl.EnumString;
 import org.openscada.opc.dcom.da.OPCBROWSETYPE;
 import org.openscada.opc.dcom.da.OPCSERVERSTATE;
@@ -36,6 +37,7 @@ import org.openscada.opc.dcom.da.impl.OPCServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -105,7 +107,6 @@ public class OpcDaOperations extends AbstractOpcOperations<OpcDaConnectionProfil
     }
 
 
-
     @Override
     public void connect(OpcDaConnectionProfile connectionProfile) {
         if (connectionProfile == null || connectionProfile.getConnectionUri() == null) {
@@ -132,7 +133,7 @@ public class OpcDaOperations extends AbstractOpcOperations<OpcDaConnectionProfil
         }
         try {
             getStateAndSet(Optional.of(ConnectionState.CONNECTING));
-            //ugly: custom port not supported by utgard since hardcoded?
+            //ugly: custom port not supported by UtGard since hardcoded?
             String connectionString = connectionProfile.getConnectionUri().getHost();
             if (connectionProfile.getComClsId() != null) {
                 this.session = JISession.createSession(connectionProfile.getDomain(),
@@ -158,12 +159,7 @@ public class OpcDaOperations extends AbstractOpcOperations<OpcDaConnectionProfil
             opcServer = new OPCServer(comServer.createInstance());
             opcItemProperties = opcServer.getItemPropertiesService();
             scheduler = executorServiceFactory.createScheduler();
-            scheduler.scheduleWithFixedDelay(() -> {
-                checkAlive();
-
-            }, 0, 1, TimeUnit.SECONDS);
-
-
+            scheduler.scheduleWithFixedDelay(this::checkAlive, 0, 1, TimeUnit.SECONDS);
         } catch (Exception e) {
             try {
                 disconnect();
@@ -216,12 +212,20 @@ public class OpcDaOperations extends AbstractOpcOperations<OpcDaConnectionProfil
     }
 
 
-    private String groupFromName(String tag) {
+    private String groupFromId(String tag) {
         int idx = tag.lastIndexOf('.');
         if (idx > 0) {
             return tag.substring(0, idx);
         }
         return "";
+    }
+
+    private String nameFromId(String tag) {
+        int idx = tag.lastIndexOf('.');
+        if (idx > 0) {
+            return tag.substring(idx + 1);
+        }
+        return tag;
     }
 
     private String toggleNullTermination(String orig) {
@@ -230,6 +234,14 @@ public class OpcDaOperations extends AbstractOpcOperations<OpcDaConnectionProfil
         }
         return orig;
     }
+
+    private <S, T> T extractFromProperty(OpcTagProperty<S> property, Function<S, T> transformer) {
+        if (property != null) {
+            return transformer.apply(property.getValue());
+        }
+        return null;
+    }
+
 
     @Override
     public Collection<OpcTagInfo> browseTags() {
@@ -243,18 +255,37 @@ public class OpcDaOperations extends AbstractOpcOperations<OpcDaConnectionProfil
                         .map(s -> {
                             OpcTagInfo ret;
                             try {
-                                ret = new OpcTagInfo().withName(s).withGroup(groupFromName(s));
-
                                 Map<Integer, PropertyDescription> properties = opcItemProperties.queryAvailableProperties(s)
                                         .stream().collect(Collectors.toMap(PropertyDescription::getId, Function.identity()));
 
-                                for (KeyedResult<Integer, JIVariant> result : opcItemProperties.getItemProperties(s, properties.keySet().stream().mapToInt(Integer::intValue).toArray())) {
-                                    if (result.getKey() == 1) {
-                                        ret.setType(JIVariantMarshaller.findJavaClass(result.getValue().getObjectAsShort()));
-                                    }
-                                    ret.addProperty(new OpcTagProperty<>(result.getKey().toString(),
+                                ret = new OpcTagInfo(s)
+                                        .withName(nameFromId(s))
+                                        .withGroup(groupFromId(s));
+
+                                KeyedResultSet<Integer, JIVariant> rawProps = opcItemProperties.getItemProperties(s,
+                                        properties.keySet().stream().mapToInt(Integer::intValue).toArray());
+                                Map<Integer, OpcTagProperty> tagProps = new HashMap<>();
+                                for (KeyedResult<Integer, JIVariant> result : rawProps) {
+                                    tagProps.put(result.getKey(), new OpcTagProperty<>(result.getKey().toString(),
                                             toggleNullTermination(properties.get(result.getKey()).getDescription()),
                                             JIVariantMarshaller.toJavaType(result.getValue())));
+                                }
+                                ret.setProperties(new HashSet<>(tagProps.values()));
+                                //set common properties
+                                ret.setScanRate(Optional.ofNullable(extractFromProperty(
+                                        (OpcTagProperty<Float>) tagProps.get(OpcDaItemProperties.MANDATORY_SERVER_SCAN_RATE),
+                                        (rate -> Duration.ofMillis(Math.round(rate))))));
+                                ret.setDescription(Optional.ofNullable((extractFromProperty(
+                                        (OpcTagProperty<String>) tagProps.get(OpcDaItemProperties.RECOMMENDED_ITEM_DESCRIPTION),
+                                        Function.identity()))));
+                                //access rights part
+                                Integer accessRightsBits = extractFromProperty(
+                                        (OpcTagProperty<Integer>) tagProps.get(OpcDaItemProperties.MANDATORY_ITEM_ACCESS_RIGHTS),
+                                        Function.identity());
+                                if (accessRightsBits != null) {
+                                    ret.withWriteAccessRights((accessRightsBits & OpcDaItemProperties.OPC_ACCESS_RIGHTS_WRITABLE) != 0);
+                                    ret.withReadAccessRights((accessRightsBits & OpcDaItemProperties.OPC_ACCESS_RIGHTS_READABLE) != 0);
+
                                 }
 
                             } catch (JIException e) {
@@ -277,7 +308,7 @@ public class OpcDaOperations extends AbstractOpcOperations<OpcDaConnectionProfil
         if (getConnectionState() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to create a session. Not connected!");
         }
-        OpcDaSession ret = OpcDaSession.create(opcServer, sessionProfile.getRefreshPeriodMillis(),
+        OpcDaSession ret = OpcDaSession.create(opcServer, sessionProfile.getRefreshPeriod().toMillis(),
                 sessionProfile.isDirectRead(), this);
         sessions.add(ret);
         return ret;
