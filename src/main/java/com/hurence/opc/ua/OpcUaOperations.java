@@ -20,6 +20,7 @@ package com.hurence.opc.ua;
 import com.hurence.opc.AbstractOpcOperations;
 import com.hurence.opc.ConnectionState;
 import com.hurence.opc.OpcTagInfo;
+import com.hurence.opc.OpcTagProperty;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
@@ -34,12 +35,20 @@ import org.eclipse.milo.opcua.sdk.client.api.identity.AnonymousProvider;
 import org.eclipse.milo.opcua.sdk.client.api.identity.IdentityProvider;
 import org.eclipse.milo.opcua.sdk.client.api.identity.UsernameProvider;
 import org.eclipse.milo.opcua.sdk.client.api.identity.X509IdentityProvider;
+import org.eclipse.milo.opcua.sdk.client.api.nodes.Node;
+import org.eclipse.milo.opcua.sdk.client.api.nodes.VariableNode;
+import org.eclipse.milo.opcua.sdk.client.api.nodes.VariableTypeNode;
+import org.eclipse.milo.opcua.sdk.client.model.nodes.objects.ServerNode;
 import org.eclipse.milo.opcua.sdk.client.model.nodes.variables.ServerStatusNode;
+import org.eclipse.milo.opcua.sdk.client.nodes.UaVariableNode;
+import org.eclipse.milo.opcua.sdk.core.AccessLevel;
 import org.eclipse.milo.opcua.stack.client.UaTcpStackClient;
+import org.eclipse.milo.opcua.stack.core.AttributeId;
 import org.eclipse.milo.opcua.stack.core.Identifiers;
 import org.eclipse.milo.opcua.stack.core.UaException;
 import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
 import org.eclipse.milo.opcua.stack.core.types.builtin.LocalizedText;
+import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.ServerState;
 import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
@@ -53,9 +62,16 @@ import java.security.Security;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
+/**
+ * OPC-UA implementation of {@link com.hurence.opc.OpcOperations}
+ *
+ * @author amarziali
+ */
 public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfile, OpcUaSessionProfile, OpcUaSession> {
 
     /**
@@ -103,10 +119,15 @@ public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfil
         if (client != null && (connectionState == ConnectionState.CONNECTING || connectionState == ConnectionState.CONNECTED)) {
             boolean inError = false;
             try {
-                ServerState status = new ServerStatusNode(client, Identifiers.ServerStatusType).getState().get();
+                // Get a typed reference to the Server object: ServerNode
+                ServerState serverState = client.getAddressSpace().
+                        getObjectNode(Identifiers.Server, ServerNode.class)
+                        .thenCompose(ServerNode::getServerStatusNode)
+                        .thenCompose(ServerStatusNode::getState)
+                        .get();
 
-                if (status == null || !ServerState.Running.equals(ServerState.from(status.getValue()))) {
-                    logger.warn("Server is no more running but rather is in state {}", status);
+                if (serverState == null || !ServerState.Running.equals(serverState)) {
+                    logger.warn("Server is no more running but rather is in state {}", serverState);
                     inError = true;
                 }
             } catch (Exception e) {
@@ -289,11 +310,158 @@ public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfil
 
     }
 
+    /**
+     * Internally browse the whole tag tree with a DFS algorithm.
+     * It retains only {@link VariableNode} objects.
+     *
+     * @param path        the root path.
+     * @param prevTagInfo the previous found tag (only if coming from -1 level.) This is used to decorate
+     *                    a variable node tag with properties found in level +1.
+     * @param result      the result collection container.
+     * @throws Exception in case of any issue.
+     */
+    private void browse(Stack<Node> path, OpcTagInfo prevTagInfo, Collection<OpcTagInfo> result) throws Exception {
+        Node n = path.isEmpty() ? null : path.peek();
+        NodeId current = n == null ? Identifiers.RootFolder : n.getNodeId().get();
+
+        OpcTagInfo currentTagInfo = null;
+
+        if (n != null && n instanceof VariableNode) {
+
+            UaVariableNode vn = (UaVariableNode) n;
+
+            final NodeId nodeId = vn.getNodeId().get();
+            VariableTypeNode vtn;
+
+            try {
+                vtn = vn.getTypeDefinition().get();
+            } catch (Exception e) {
+                logger.warn("Unable to resolve property type for {}. Defaulting to BaseDataVariableType", nodeId);
+                vtn = client.getAddressSpace().createVariableTypeNode(Identifiers.BaseDataVariableType);
+            }
+
+
+            if (prevTagInfo != null && Identifiers.PropertyType.equals(vtn.getNodeId().get())) {
+                OpcTagInfo info = fillOpcTagInformation(new OpcTagInfo(nodeId.toParseableString()), vn);
+
+                prevTagInfo.addProperty(new OpcTagProperty<>(info.getId(),
+                        info.getDescription().orElse(info.getName()),
+                        vn.getValue().exceptionally(e -> null).thenApply(UaVariantMarshaller::toJavaType).get()));
+
+
+            } else {
+                Optional<Class<?>> cls = UaVariantMarshaller.findJavaClass(client, n.getNodeId().get());
+                if (cls.isPresent()) {
+                    currentTagInfo = new OpcTagInfo(nodeId.toParseableString())
+                            .withGroup(path.stream().limit(path.size() - 1)
+                                    .map(theNode -> {
+                                        try {
+                                            return theNode.getBrowseName().get().getName();
+                                        } catch (Exception e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    }).collect(Collectors.joining(".")))
+                            .withName(path.peek().getBrowseName().get().getName())
+                            .withType(cls.get());
+                    result.add(fillOpcTagInformation(currentTagInfo, vn));
+                }
+
+            }
+
+        }
+
+        //browse next
+
+        List<Node> nodes = client.getAddressSpace().browse(current).get();
+        if (nodes != null && !nodes.isEmpty())
+
+        {
+            for (Node child : nodes) {
+                path.push(child);
+                browse(path, currentTagInfo, result);
+                path.pop();
+            }
+        }
+
+    }
+
 
     @Override
     public Collection<OpcTagInfo> browseTags() {
-        return null;
+        Set<OpcTagInfo> ret = new LinkedHashSet<>();
+        try {
+            browse(new Stack<>(), null, ret);
+        } catch (Exception e) {
+            throw new OpcException("Unable to browse tags", e);
+        }
+        return ret;
     }
+
+    /**
+     * Introspects a variable node and return structured information.
+     *
+     * @param info the opc tag container.
+     * @param vn   the {@link VariableNode} to introspect.
+     * @return the info value.
+     */
+    private OpcTagInfo fillOpcTagInformation(OpcTagInfo info, VariableNode vn) {
+        try {
+            //final VariableNode vn = client.getAddressSpace().createVariableNode(ref.getNodeId().local().get());
+
+            CompletableFuture.allOf(
+                    vn.getMinimumSamplingInterval().exceptionally(e -> null).whenCompleteAsync((d, e) -> {
+                        info.setScanRate(Optional.ofNullable(
+                                d != null && d > 0.0 ? Duration.ofNanos(Math.round(d * 1e6)) : null));
+                        if (d != null) {
+                            info.addProperty(new OpcTagProperty<>(Integer.toString(AttributeId.MinimumSamplingInterval.id()),
+                                    AttributeId.MinimumSamplingInterval.toString(),
+                                    d));
+                        }
+
+                    }),
+                    vn.getHistorizing().exceptionally(e -> null).whenCompleteAsync((historizing, e) -> info.addProperty(new OpcTagProperty<>(
+                            Integer.toString(AttributeId.Historizing.id()), AttributeId.Historizing.toString(), historizing == null ? false : historizing))),
+                    vn.getDescription().exceptionally(e -> null).whenCompleteAsync((description, e1) -> {
+                        try {
+                            LocalizedText displayName = vn.getDescription().exceptionally(e -> null).get();
+                            String toSet = null;
+                            if (description != null && description.getText() != null) {
+                                toSet = description.getText();
+                                info.addProperty(new OpcTagProperty<>(Integer.toString(AttributeId.Description.id()),
+                                        AttributeId.Description.toString(),
+                                        description.getText()));
+                            }
+                            if (displayName != null && displayName.getText() != null) {
+                                info.addProperty(new OpcTagProperty<>(Integer.toString(AttributeId.DisplayName.id()),
+                                        AttributeId.DisplayName.toString(),
+                                        displayName.getText()));
+                                if (toSet == null) {
+                                    toSet = displayName.getText();
+                                }
+                            }
+                            info.setDescription(Optional.ofNullable(toSet));
+
+                        } catch (Exception e2) {
+                            //just swallow
+                        }
+                    }),
+                    vn.getAccessLevel().exceptionally(e -> null).whenCompleteAsync((accessLevel, e) -> {
+                        if (accessLevel != null) {
+                            EnumSet<AccessLevel> levels = AccessLevel.fromMask(accessLevel);
+                            info.withReadAccessRights(levels.contains(AccessLevel.CurrentRead));
+                            info.withWriteAccessRights(levels.contains(AccessLevel.CurrentWrite));
+                            //set the mask for more advanced usages
+                            info.addProperty(new OpcTagProperty<>(Integer.toString(AttributeId.AccessLevel.id()), AttributeId.AccessLevel.toString(), accessLevel.intValue()));
+                        }
+                    })
+            ).get();
+
+        } catch (Exception e) {
+            logger.warn("Unable to properly fill information for tag " + vn, e);
+        }
+        return info;
+    }
+
 
     @Override
     public OpcUaSession createSession(OpcUaSessionProfile sessionProfile) {

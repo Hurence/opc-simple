@@ -51,7 +51,7 @@ public class OpcTagInfo {
     /**
      * The item description (if available).
      */
-    private Optional<String> description;
+    private Optional<String> description = Optional.empty();
     /**
      * The Group (hierarchically separated by a dot '.' character
      */
@@ -64,7 +64,7 @@ public class OpcTagInfo {
     /**
      * The server scan rate (if available)
      */
-    private Optional<Duration> scanRate;
+    private Optional<Duration> scanRate = Optional.empty();
 
     /**
      * The access rights (always non null).
@@ -231,7 +231,7 @@ public class OpcTagInfo {
      * @param property the not null {@link OpcTagProperty}
      * @return itself.
      */
-    public OpcTagInfo addProperty(OpcTagProperty property) {
+    public synchronized OpcTagInfo addProperty(OpcTagProperty property) {
         properties.add(property);
         return this;
     }

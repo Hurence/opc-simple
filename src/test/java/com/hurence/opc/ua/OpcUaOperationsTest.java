@@ -17,6 +17,8 @@
 
 package com.hurence.opc.ua;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hurence.opc.OpcTagInfo;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
@@ -34,6 +36,8 @@ import java.net.URI;
 import java.security.KeyPair;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.util.Collection;
+import java.util.Optional;
 
 /**
  * {@link OpcUaOperations} tests.
@@ -77,7 +81,7 @@ public class OpcUaOperationsTest {
 
     private OpcUaConnectionProfile createConnectionProfile() {
         return (new OpcUaConnectionProfile()
-                .withConnectionUri(URI.create(server.getBindEndpoint()))
+                .withConnectionUri(URI.create("opc.tcp://localhost:53530/OPCUA/SimulationServer"))
                 .withClientIdUri("hurence:opc-simple:client:test")
                 .withClientName("Simple OPC test client")
                 .withSocketTimeout(Duration.ofSeconds(5))
@@ -145,7 +149,15 @@ public class OpcUaOperationsTest {
     public void testBrowse() throws Exception {
         try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
             opcUaOperations.connect(createConnectionProfile());
-            opcUaOperations.browseTags();
+            Collection<OpcTagInfo> ret = opcUaOperations.browseTags();
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.findAndRegisterModules();
+            logger.info("{}", mapper.writeValueAsString(ret));
+            Optional<OpcTagInfo> sint = ret.stream().filter(t -> "SinT".equals(t.getName()) &&
+                    "Objects.TestFolder".equals(t.getGroup()))
+                    .findFirst();
+            //Assert.assertTrue(sint.isPresent());
+            Assert.assertFalse(ret.isEmpty());
         }
     }
 

@@ -18,18 +18,23 @@
 package com.hurence.opc.ua;
 
 
+import org.eclipse.milo.opcua.sdk.core.AccessLevel;
 import org.eclipse.milo.opcua.sdk.core.Reference;
 import org.eclipse.milo.opcua.sdk.server.OpcUaServer;
 import org.eclipse.milo.opcua.sdk.server.api.*;
 import org.eclipse.milo.opcua.sdk.server.model.nodes.objects.FolderNode;
+import org.eclipse.milo.opcua.sdk.server.model.nodes.variables.AnalogItemNode;
 import org.eclipse.milo.opcua.sdk.server.nodes.*;
 import org.eclipse.milo.opcua.sdk.server.util.SubscriptionModel;
 import org.eclipse.milo.opcua.stack.core.Identifiers;
 import org.eclipse.milo.opcua.stack.core.StatusCodes;
 import org.eclipse.milo.opcua.stack.core.UaException;
 import org.eclipse.milo.opcua.stack.core.types.builtin.*;
+import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UShort;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
+import org.eclipse.milo.opcua.stack.core.types.structured.Range;
 import org.eclipse.milo.opcua.stack.core.types.structured.ReadValueId;
 import org.eclipse.milo.opcua.stack.core.types.structured.WriteValue;
 
@@ -76,11 +81,14 @@ public class TestNamespace implements Namespace {
         // add single variable
 
         {
-            final UaVariableNode variable = new UaVariableNode(
+            final AnalogItemNode variable = new AnalogItemNode(
                     this.nodeMap,
                     new NodeId(this.index, "sint"),
                     new QualifiedName(this.index, "SinT"),
-                    LocalizedText.english("Sin (t)")) {
+                    LocalizedText.english("Sin (t)"),
+                    LocalizedText.english("Sinus of (t)"),
+                    UInteger.valueOf(AccessLevel.getMask(AccessLevel.READ_WRITE)),
+                    UInteger.valueOf(AccessLevel.getMask(AccessLevel.READ_WRITE))) {
 
                 @Override
                 public DataValue getValue() {
@@ -88,7 +96,12 @@ public class TestNamespace implements Namespace {
                 }
             };
 
+            variable.setInstrumentRange(new Range(-1.0, +1.0));
             variable.setDataType(Identifiers.Double);
+            variable.setDescription(LocalizedText.english("Sinusoid signal"));
+            variable.addReference(new Reference(variable.getNodeId(), Identifiers.HasTypeDefinition,
+                    Identifiers.AnalogItemType.expanded(),
+                    NodeClass.VariableType, true));
             folder.addOrganizes(variable);
         }
 

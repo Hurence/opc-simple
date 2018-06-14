@@ -272,6 +272,11 @@ public class OpcDaOperations extends AbstractOpcOperations<OpcDaConnectionProfil
                                 }
                                 ret.setProperties(new HashSet<>(tagProps.values()));
                                 //set common properties
+                                if (tagProps.containsKey(OpcDaItemProperties.MANDATORY_DATA_TYPE)) {
+                                    OpcTagProperty<Integer> tmp = tagProps.get(OpcDaItemProperties.MANDATORY_DATA_TYPE);
+                                    ret.setType(JIVariantMarshaller.findJavaClass(tmp != null && tmp.getValue() != null ? tmp.getValue() : JIVariant.VT_EMPTY));
+                                }
+
                                 ret.setScanRate(Optional.ofNullable(extractFromProperty(
                                         (OpcTagProperty<Float>) tagProps.get(OpcDaItemProperties.MANDATORY_SERVER_SCAN_RATE),
                                         (rate -> Duration.ofMillis(Math.round(rate))))));
