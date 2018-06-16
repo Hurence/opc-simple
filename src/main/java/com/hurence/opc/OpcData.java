@@ -18,8 +18,6 @@
 package com.hurence.opc;
 
 import java.time.Instant;
-import java.util.Objects;
-import java.util.Optional;
 
 /**
  * OPC data model.
@@ -41,16 +39,16 @@ public class OpcData<T> {
      * The quality of data. Value is server dependent. It's meaningful if you read data not directly from a device but
      * rather from the server cache (default mode).
      */
-    private int quality;
+    private Quality quality;
     /**
      * The value of the data.
      */
     private T value;
 
     /**
-     * Read/Write error code. Codes are generated server side.
+     * The status of the operation that generated this data.
      */
-    private Optional<Integer> errorCode = Optional.empty();
+    private OperationStatus operationStatus;
 
     /**
      * Default ctor.
@@ -61,35 +59,34 @@ public class OpcData<T> {
 
 
     /**
-     * Construct an object with parameters.
+     * Construct an object with parameters (useful for write).
      *
      * @param tag       the tag (item) id.
      * @param timestamp the timestamp of last data change.
-     * @param quality   the quality of the data (set by the server depending on its caching policies.
      * @param value     the value.
      */
-    public OpcData(String tag, Instant timestamp, int quality, T value) {
+    public OpcData(String tag, Instant timestamp, T value) {
         this.tag = tag;
         this.timestamp = timestamp;
-        this.quality = quality;
         this.value = value;
     }
+
 
     /**
      * Construct an object with parameters.
      *
-     * @param tag       the tag (item) id.
-     * @param timestamp the timestamp of last data change.
-     * @param quality   the quality of the data (set by the server depending on its caching policies.
-     * @param value     the value.
-     * @param errorCode the optional error code. Can be null.
+     * @param tag             the tag (item) id.
+     * @param timestamp       the timestamp of last data change.
+     * @param quality         the quality of the data (set by the server).
+     * @param value           the value.
+     * @param operationStatus the status of the operation that generated the data.
      */
-    public OpcData(String tag, Instant timestamp, int quality, T value, Integer errorCode) {
+    public OpcData(String tag, Instant timestamp, Quality quality, T value, OperationStatus operationStatus) {
         this.tag = tag;
         this.timestamp = timestamp;
         this.quality = quality;
         this.value = value;
-        this.errorCode = Optional.ofNullable(errorCode);
+        this.operationStatus = operationStatus;
     }
 
 
@@ -109,14 +106,6 @@ public class OpcData<T> {
         this.timestamp = timestamp;
     }
 
-    public int getQuality() {
-        return quality;
-    }
-
-    public void setQuality(int quality) {
-        this.quality = quality;
-    }
-
     public T getValue() {
         return value;
     }
@@ -125,30 +114,17 @@ public class OpcData<T> {
         this.value = value;
     }
 
-    public Optional<Integer> getErrorCode() {
-        return errorCode;
+
+    public void setQuality(Quality quality) {
+        this.quality = quality;
     }
 
-    public void setErrorCode(Optional<Integer> errorCode) {
-        this.errorCode = errorCode;
+    public OperationStatus getOperationStatus() {
+        return operationStatus;
     }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        OpcData<?> opcData = (OpcData<?>) o;
-        return quality == opcData.quality &&
-                Objects.equals(tag, opcData.tag) &&
-                Objects.equals(timestamp, opcData.timestamp) &&
-                Objects.equals(value, opcData.value) &&
-                Objects.equals(errorCode, opcData.errorCode);
-    }
-
-    @Override
-    public int hashCode() {
-
-        return Objects.hash(tag, timestamp, quality, value, errorCode);
+    public void setOperationStatus(OperationStatus operationStatus) {
+        this.operationStatus = operationStatus;
     }
 
     @Override
@@ -158,7 +134,7 @@ public class OpcData<T> {
                 ", timestamp=" + timestamp +
                 ", quality=" + quality +
                 ", value=" + value +
-                ", errorCode=" + errorCode +
+                ", operationStatus=" + operationStatus +
                 '}';
     }
 }

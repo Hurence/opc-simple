@@ -79,6 +79,12 @@ public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfil
      */
     private static final Logger logger = LoggerFactory.getLogger(OpcUaOperations.class);
 
+    /**
+     * Map of held sessions.
+     */
+    private final Set<OpcUaSession> sessions = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+
+
     static {
         CryptoRestrictions.remove();
         Security.addProvider(new BouncyCastleProvider());
@@ -296,9 +302,21 @@ public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfil
     @Override
     public void disconnect() {
         try {
+            //cleanup here
+            while (!sessions.isEmpty()) {
+                try {
+                    OpcUaSession session = sessions.stream().findFirst().orElse(null);
+                    if (session != null) {
+                        sessions.remove(session);
+                        session.close();
+                    }
+                } catch (Exception e) {
+                    logger.warn("Unable to properly close a session", e);
+                }
+            }
             getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
             scheduler.shutdown();
-            //cleanup here
+
             client.disconnect().get();
         } catch (Exception e) {
             throw new OpcException("Unable to properly disconnect", e);
@@ -307,7 +325,6 @@ public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfil
             scheduler = null;
             client = null;
         }
-
     }
 
     /**
@@ -369,13 +386,9 @@ public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfil
             }
 
         }
-
         //browse next
-
         List<Node> nodes = client.getAddressSpace().browse(current).get();
-        if (nodes != null && !nodes.isEmpty())
-
-        {
+        if (nodes != null && !nodes.isEmpty()) {
             for (Node child : nodes) {
                 path.push(child);
                 browse(path, currentTagInfo, result);
@@ -465,17 +478,20 @@ public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfil
 
     @Override
     public OpcUaSession createSession(OpcUaSessionProfile sessionProfile) {
-        return null;
+        return OpcUaSession.create(client, sessionProfile.getRefreshPeriod().toMillis(), this);
     }
 
     @Override
     public void releaseSession(OpcUaSession session) {
-
+        if (getConnectionState() == ConnectionState.CONNECTED && session != null) {
+            sessions.remove(session);
+            session.cleanup();
+        }
     }
 
 
     @Override
     public void close() throws Exception {
-
+        disconnect();
     }
 }

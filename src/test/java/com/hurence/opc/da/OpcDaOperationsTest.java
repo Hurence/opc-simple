@@ -20,6 +20,7 @@ package com.hurence.opc.da;
 import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcSession;
 import com.hurence.opc.OpcTagInfo;
+import com.hurence.opc.OperationStatus;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.util.AutoReconnectOpcOperations;
 import org.junit.*;
@@ -31,6 +32,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.Collection;
 
 /**
  * E2E test. You can run by spawning an OPC-DA test server and changing connection parameters to target it.
@@ -103,14 +105,13 @@ public class OpcDaOperationsTest {
             session = opcDaOperations.createSession(sessionProfile);
             OpcData<String> result = null;
 
-            int lastQuality = 0;
-            while (lastQuality < 100) {
+            OperationStatus lastQuality;
+            do {
                 result = session.read("Read Error.String").stream().findFirst().get();
                 System.out.println(result);
-                lastQuality = result.getQuality();
-            }
-            Assert.assertTrue(result.getErrorCode().isPresent());
-            System.out.println("Received error : " + result.getErrorCode().get());
+                lastQuality = result.getOperationStatus();
+            } while (lastQuality.getLevel() != OperationStatus.Level.INFO);
+            System.out.println("Received error : " + result.getOperationStatus());
 
         } finally {
             opcDaOperations.releaseSession(session);
@@ -163,7 +164,13 @@ public class OpcDaOperationsTest {
 
         try {
             session = opcDaOperations.createSession(sessionProfile);
-            Assert.assertTrue(session.write(new OpcData("Square Waves.Real8", Instant.now(), 120, 123.31)));
+            Collection<OperationStatus> result =
+                    session.write(new OpcData<>("Square Waves.Real8", Instant.now(), 123.31));
+            logger.info("Write result: {}", result);
+            Assert.assertTrue(result
+                    .stream().noneMatch(operationStatus -> operationStatus.getLevel() != OperationStatus.Level.INFO));
+
+
         } finally {
             opcDaOperations.releaseSession(session);
         }
@@ -178,7 +185,10 @@ public class OpcDaOperationsTest {
 
         try {
             session = opcDaOperations.createSession(sessionProfile);
-            Assert.assertFalse(session.write(new OpcData("Square Waves.Real8", Instant.now(), 120, "I'm not a number")));
+            Collection<OperationStatus> result = session.write(new OpcData("Square Waves.Real8", Instant.now(), "I'm not a number"));
+            logger.info("Write result: {}", result);
+            Assert.assertFalse(result.stream()
+                    .noneMatch(operationStatus -> operationStatus.getLevel() != OperationStatus.Level.INFO));
         } finally {
             opcDaOperations.releaseSession(session);
         }

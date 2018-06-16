@@ -24,7 +24,10 @@ import org.eclipse.milo.opcua.sdk.server.OpcUaServer;
 import org.eclipse.milo.opcua.sdk.server.api.*;
 import org.eclipse.milo.opcua.sdk.server.model.nodes.objects.FolderNode;
 import org.eclipse.milo.opcua.sdk.server.model.nodes.variables.AnalogItemNode;
-import org.eclipse.milo.opcua.sdk.server.nodes.*;
+import org.eclipse.milo.opcua.sdk.server.nodes.AttributeContext;
+import org.eclipse.milo.opcua.sdk.server.nodes.ServerNode;
+import org.eclipse.milo.opcua.sdk.server.nodes.UaFolderNode;
+import org.eclipse.milo.opcua.sdk.server.nodes.UaMethodNode;
 import org.eclipse.milo.opcua.sdk.server.util.SubscriptionModel;
 import org.eclipse.milo.opcua.stack.core.Identifiers;
 import org.eclipse.milo.opcua.stack.core.StatusCodes;
@@ -92,7 +95,9 @@ public class TestNamespace implements Namespace {
 
                 @Override
                 public DataValue getValue() {
-                    return new DataValue(new Variant(Math.sin(System.currentTimeMillis() / 1000)));
+                    return new DataValue(new Variant(Math.sin(System.currentTimeMillis() / 1000.0)),
+                            StatusCode.GOOD,
+                            DateTime.now());
                 }
             };
 

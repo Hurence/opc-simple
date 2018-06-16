@@ -24,10 +24,7 @@ import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
 import org.eclipse.milo.opcua.stack.core.util.SelfSignedCertificateGenerator;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -80,6 +77,15 @@ public class OpcUaOperationsTest {
 
 
     private OpcUaConnectionProfile createConnectionProfile() {
+        return (new OpcUaConnectionProfile()
+                .withConnectionUri(URI.create(server.getBindEndpoint()))
+                .withClientIdUri("hurence:opc-simple:client:test")
+                .withClientName("Simple OPC test client")
+                .withSocketTimeout(Duration.ofSeconds(5))
+        );
+    }
+
+    private OpcUaConnectionProfile createProsysConnectionProfile() {
         return (new OpcUaConnectionProfile()
                 .withConnectionUri(URI.create("opc.tcp://localhost:53530/OPCUA/SimulationServer"))
                 .withClientIdUri("hurence:opc-simple:client:test")
@@ -156,10 +162,32 @@ public class OpcUaOperationsTest {
             Optional<OpcTagInfo> sint = ret.stream().filter(t -> "SinT".equals(t.getName()) &&
                     "Objects.TestFolder".equals(t.getGroup()))
                     .findFirst();
-            //Assert.assertTrue(sint.isPresent());
+            Assert.assertTrue(sint.isPresent());
             Assert.assertFalse(ret.isEmpty());
+
+
         }
     }
 
+    @Test
+    public void testRead() throws Exception {
+        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
+            opcUaOperations.connect(createConnectionProfile());
+            OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+                    .withRefreshPeriod(Duration.ofMillis(10)));
+            logger.info("Read tag {}", session.read("ns=2;s=sint"));
+        }
+    }
+
+    @Ignore
+    @Test
+    public void testReamdFromProsys() throws Exception {
+        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
+            opcUaOperations.connect(createProsysConnectionProfile());
+            OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+                    .withRefreshPeriod(Duration.ofMillis(10)));
+            logger.info("Read tag {}", session.read("ns=5;s=Sawtooth1"));
+        }
+    }
 
 }

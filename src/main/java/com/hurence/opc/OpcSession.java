@@ -42,9 +42,9 @@ public interface OpcSession extends AutoCloseable {
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
      *
      * @param data the data to be written.
-     * @return true if operation is successful, false otherwise
+     * @return the status of each write operation.
      */
-    boolean write(OpcData... data);
+    Collection<OperationStatus> write(OpcData... data);
 
     /**
      * Continuously read a stream of tags.
