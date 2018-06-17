@@ -21,6 +21,7 @@ import com.hurence.opc.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Proxy;
 import java.util.Collection;
 import java.util.concurrent.ExecutorService;
 
@@ -51,12 +52,36 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     private final OpcOperations<S, T, U> delegate;
 
     /**
+     * Create a new dynamic proxy instance allowing for seamless automatic reconnection.
+     *
+     * @param delegate the {@link OpcOperations} to decorate.
+     * @return the decorated instance.
+     */
+    @SuppressWarnings("unchecked")
+    public static <O extends OpcOperations> O create(final O delegate) {
+        final AutoReconnectOpcOperations toProxy = new AutoReconnectOpcOperations(delegate);
+        return (O) Proxy.newProxyInstance(delegate.getClass().getClassLoader(),
+                delegate.getClass().getInterfaces(),
+                (proxy, method, args) -> {
+                    try {
+                        return toProxy.getClass().getMethod(method.getName(), method.getParameterTypes())
+                                .invoke(toProxy, args);
+                    } catch (NoSuchMethodException e) {
+                        return delegate.getClass().getMethod(method.getName(), method.getParameterTypes())
+                                .invoke(delegate, args);
+                    }
+                });
+    }
+
+
+    /**
      * Construct an instance.
      *
      * @param delegate the delegate
      */
-    public AutoReconnectOpcOperations(OpcOperations<S, T, U> delegate) {
+    private AutoReconnectOpcOperations(OpcOperations<S, T, U> delegate) {
         this.delegate = delegate;
+
     }
 
     @Override

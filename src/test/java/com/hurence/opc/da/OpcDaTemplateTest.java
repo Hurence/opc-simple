@@ -41,9 +41,9 @@ import java.util.Collection;
  * @author amarziali
  */
 @Ignore
-public class OpcDaOperationsTest {
+public class OpcDaTemplateTest {
 
-    private final Logger logger = LoggerFactory.getLogger(OpcDaOperationsTest.class);
+    private final Logger logger = LoggerFactory.getLogger(OpcDaTemplateTest.class);
 
 
     private OpcDaOperations opcDaOperations;
@@ -52,7 +52,7 @@ public class OpcDaOperationsTest {
 
     @Before
     public void init() throws Exception {
-        opcDaOperations = new OpcDaOperations();
+        opcDaOperations = new OpcDaTemplate();
         connectionProfile = new OpcDaConnectionProfile()
                 .withComClsId("F8582CF2-88FB-11D0-B850-00C0F0104305")
                 .withDomain("OPC-9167C0D9342")
@@ -196,7 +196,7 @@ public class OpcDaOperationsTest {
 
     @Test
     public void testAutoReconnect() throws Exception {
-        AutoReconnectOpcOperations autoReconnectOpcOperations = new AutoReconnectOpcOperations(opcDaOperations);
+        OpcDaOperations autoReconnectOpcOperations = AutoReconnectOpcOperations.create(opcDaOperations);
         opcDaOperations.disconnect();
         autoReconnectOpcOperations.connect(connectionProfile);
         Assert.assertTrue(autoReconnectOpcOperations.awaitConnected());

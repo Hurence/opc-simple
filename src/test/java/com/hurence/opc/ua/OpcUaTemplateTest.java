@@ -25,6 +25,7 @@ import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
+import com.hurence.opc.util.AutoReconnectOpcOperations;
 import org.eclipse.milo.opcua.stack.core.util.SelfSignedCertificateGenerator;
 import org.junit.*;
 import org.knowm.xchart.QuickChart;
@@ -45,14 +46,14 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * {@link OpcUaOperations} tests.
+ * {@link OpcUaTemplate} tests.
  * This suite spawns a fake OPC-UA test on localhost on any free port.
  *
  * @author amarziali
  */
-public class OpcUaOperationsTest {
+public class OpcUaTemplateTest {
 
-    private static final Logger logger = LoggerFactory.getLogger(OpcUaOperationsTest.class);
+    private static final Logger logger = LoggerFactory.getLogger(OpcUaTemplateTest.class);
 
     private static TestOpcServer server;
 
@@ -104,35 +105,35 @@ public class OpcUaOperationsTest {
 
     @Test
     public void connectionUserPasswordSuccessTest() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
-            opcUaOperations.connect(createConnectionProfile()
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile()
                     .withCredentials(new UsernamePasswordCredentials()
                             .withUser("user")
                             .withPassword("password1"))
             );
-            Assert.assertTrue(opcUaOperations.awaitConnected());
+            Assert.assertTrue(opcUaTemplate.awaitConnected());
         }
     }
 
     @Test
     public void connectionAnonymousSuccessTest() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
-            opcUaOperations.connect(createConnectionProfile()
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile()
                     .withCredentials(Credentials.ANONYMOUS_CREDENTIALS));
-            Assert.assertTrue(opcUaOperations.awaitConnected());
-            Assert.assertFalse(opcUaOperations.isChannelSecured());
+            Assert.assertTrue(opcUaTemplate.awaitConnected());
+            Assert.assertFalse(opcUaTemplate.isChannelSecured());
         }
     }
 
     @Test
     public void connectionOnSecuredChannelSuccessTest() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             OpcUaConnectionProfile connectionProfile = createConnectionProfile();
-            opcUaOperations.connect(connectionProfile
+            opcUaTemplate.connect(connectionProfile
                     .withCredentials(Credentials.ANONYMOUS_CREDENTIALS)
                     .withSecureChannelEncryption(createX509Credentials(connectionProfile.getClientIdUri())));
-            Assert.assertTrue(opcUaOperations.awaitConnected());
-            Assert.assertTrue(opcUaOperations.isChannelSecured());
+            Assert.assertTrue(opcUaTemplate.awaitConnected());
+            Assert.assertTrue(opcUaTemplate.isChannelSecured());
 
         }
     }
@@ -140,8 +141,8 @@ public class OpcUaOperationsTest {
 
     @Test(expected = OpcException.class)
     public void connectionUserPasswordFails() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
-            opcUaOperations.connect(createConnectionProfile()
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile()
                     .withCredentials(new UsernamePasswordCredentials()
                             .withUser("user")
                             .withPassword("badpassword"))
@@ -151,19 +152,19 @@ public class OpcUaOperationsTest {
 
     @Test
     public void connectionX509dSuccessTest() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             OpcUaConnectionProfile connectionProfile = createConnectionProfile();
-            opcUaOperations.connect(connectionProfile
+            opcUaTemplate.connect(connectionProfile
                     .withCredentials(createX509Credentials(connectionProfile.getClientIdUri())));
-            Assert.assertTrue(opcUaOperations.awaitConnected());
+            Assert.assertTrue(opcUaTemplate.awaitConnected());
         }
     }
 
     @Test
     public void testBrowse() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
-            opcUaOperations.connect(createConnectionProfile());
-            Collection<OpcTagInfo> ret = opcUaOperations.browseTags();
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile());
+            Collection<OpcTagInfo> ret = opcUaTemplate.browseTags();
             ObjectMapper mapper = new ObjectMapper();
             mapper.findAndRegisterModules();
             logger.info("{}", mapper.writeValueAsString(ret));
@@ -179,9 +180,9 @@ public class OpcUaOperationsTest {
 
     @Test
     public void testRead() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
-            opcUaOperations.connect(createConnectionProfile());
-            OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile());
+            OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withRefreshPeriod(Duration.ofMillis(10)));
             logger.info("Read tag {}", session.read("ns=2;s=sint"));
         }
@@ -189,9 +190,9 @@ public class OpcUaOperationsTest {
 
     @Test
     public void testWrite() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
-            opcUaOperations.connect(createConnectionProfile());
-            OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile());
+            OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withRefreshPeriod(Duration.ofMillis(10)));
             List<OperationStatus> result = session.write(
                     new OpcData("ns=2;s=HelloWorld/Dynamic/Double", Instant.now(), 3.1415d),
@@ -207,9 +208,9 @@ public class OpcUaOperationsTest {
 
     @Test
     public void testStream() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
-            opcUaOperations.connect(createConnectionProfile());
-            try (OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile());
+            try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withDefaultPollingInterval(Duration.ofMillis(1))
                     .withRefreshPeriod(Duration.ofMillis(100)))) {
                 final List<OpcData<Double>> values = new ArrayList<>();
@@ -223,25 +224,21 @@ public class OpcUaOperationsTest {
 
     @Test
     public void testStreamWithGraph() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
-            opcUaOperations.connect(createProsysConnectionProfile());
-            try (OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile());
+            try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withDefaultPollingInterval(Duration.ofMillis(10))
                     .withRefreshPeriod(Duration.ofMillis(100)))) {
 
                 final long startTime = System.currentTimeMillis();
                 final List<OpcData<Double>> items = new ArrayList<>();
-
-
-                session.stream("ns=5;s=Sawtooth1").limit(200).forEach(items::add);
-                System.err.println(items.size());
+                session.stream("ns=2;s=sint").limit(200).forEach(items::add);
                 // Create Chart
                 final XYChart chart = QuickChart.getChart("Simple XChart Real-time Demo", "Time", "Sine (f=1second)", "sine",
                         items.stream().mapToDouble(d -> d.getTimestamp().toEpochMilli() - startTime).toArray(),
                         items.stream().mapToDouble(OpcData::getValue).toArray());
                 // Show it
                 final SwingWrapper<XYChart> sw = new SwingWrapper<>(chart);
-                sw.displayChart();
                 Thread.sleep(200000);
 
             }
@@ -251,9 +248,9 @@ public class OpcUaOperationsTest {
     @Test
     @Ignore
     public void testStreamFromProsys() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
-            opcUaOperations.connect(createProsysConnectionProfile());
-            try (OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createProsysConnectionProfile());
+            try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withDefaultPollingInterval(Duration.ofMillis(10))
                     .withRefreshPeriod(Duration.ofMillis(100)))) {
                 final List<OpcData<Double>> values = new ArrayList<>();
@@ -267,12 +264,37 @@ public class OpcUaOperationsTest {
     }
 
 
+    @Test
+    @Ignore
+    public void testStreamAutoreconnectFromProsys() throws Exception {
+        try (OpcUaOperations opcUaTemplate = AutoReconnectOpcOperations.create(new OpcUaTemplate())) {
+            opcUaTemplate.connect(createProsysConnectionProfile());
+            try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
+                    .withDefaultPollingInterval(Duration.ofMillis(100))
+                    .withRefreshPeriod(Duration.ofMillis(100)))) {
+                session.stream("ns=5;s=Sawtooth1").limit(1000).forEach(System.err::println);
+                //disconnect here
+            } catch (OpcException e) {
+                //we have an EOF. Normal
+            }
+            Assert.assertTrue(opcUaTemplate.awaitDisconnected());
+            //connect here
+            Assert.assertTrue(opcUaTemplate.awaitConnected());
+            try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
+                    .withDefaultPollingInterval(Duration.ofMillis(100))
+                    .withRefreshPeriod(Duration.ofMillis(100)))) {
+
+                session.stream("ns=5;s=Sawtooth1").limit(100).forEach(System.err::println);
+            }
+        }
+    }
+
     @Ignore
     @Test
     public void testReadFromProsys() throws Exception {
-        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
-            opcUaOperations.connect(createProsysConnectionProfile());
-            OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createProsysConnectionProfile());
+            OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withRefreshPeriod(Duration.ofMillis(10)));
             logger.info("Read tag {}", session.read("ns=5;s=Sawtooth1"));
         }

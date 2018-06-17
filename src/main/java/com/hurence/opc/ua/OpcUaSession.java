@@ -65,11 +65,11 @@ public class OpcUaSession implements OpcSession {
     private final Duration defaultPollPeriod;
     private final Map<String, Duration> pollingMap;
     private final WeakReference<OpcUaClient> client;
-    private final WeakReference<OpcUaOperations> creatingOperations;
+    private final WeakReference<OpcUaTemplate> creatingOperations;
     private UaSubscription subscription;
 
 
-    private OpcUaSession(OpcUaOperations creatingOperations,
+    private OpcUaSession(OpcUaTemplate creatingOperations,
                          OpcUaClient client,
                          Duration refreshPeriod,
                          Duration defaultPollingInterval,
@@ -82,7 +82,7 @@ public class OpcUaSession implements OpcSession {
     }
 
 
-    static OpcUaSession create(OpcUaOperations creatingOperations,
+    static OpcUaSession create(OpcUaTemplate creatingOperations,
                                OpcUaClient client,
                                OpcUaSessionProfile sessionProfile) {
         try {

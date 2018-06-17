@@ -62,9 +62,9 @@ public class OpcDaSession implements OpcSession {
     private OPCSyncIO syncIO;
     private OPCItemMgt opcItemMgt;
     private OPCDATASOURCE datasource;
-    private final WeakReference<OpcDaOperations> creatingOperations;
+    private final WeakReference<OpcDaTemplate> creatingOperations;
 
-    private OpcDaSession(OpcDaOperations creatingOperations, OPCGroupStateMgt group, OPCDATASOURCE datasource,
+    private OpcDaSession(OpcDaTemplate creatingOperations, OPCGroupStateMgt group, OPCDATASOURCE datasource,
                          long refreshPeriodMillis) throws JIException {
         this.group = group;
         this.opcItemMgt = group.getItemManagement();
@@ -74,7 +74,7 @@ public class OpcDaSession implements OpcSession {
         this.creatingOperations = new WeakReference<>(creatingOperations);
     }
 
-    static OpcDaSession create(OPCServer server, long refreshPeriodMillis, boolean directRead, OpcDaOperations creatingOperations) {
+    static OpcDaSession create(OPCServer server, long refreshPeriodMillis, boolean directRead, OpcDaTemplate creatingOperations) {
         try {
             return new OpcDaSession(creatingOperations,
                     server.addGroup(null, true,
