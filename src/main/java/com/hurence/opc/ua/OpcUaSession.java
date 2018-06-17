@@ -22,56 +22,89 @@ import com.hurence.opc.OpcSession;
 import com.hurence.opc.OperationStatus;
 import com.hurence.opc.exception.OpcException;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
+import org.eclipse.milo.opcua.sdk.client.api.subscriptions.UaMonitoredItem;
 import org.eclipse.milo.opcua.sdk.client.api.subscriptions.UaSubscription;
-import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
-import org.eclipse.milo.opcua.stack.core.types.builtin.DateTime;
-import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
+import org.eclipse.milo.opcua.stack.core.AttributeId;
+import org.eclipse.milo.opcua.stack.core.StatusCodes;
+import org.eclipse.milo.opcua.stack.core.types.builtin.*;
+import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.MonitoringMode;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
+import org.eclipse.milo.opcua.stack.core.types.structured.MonitoredItemCreateRequest;
+import org.eclipse.milo.opcua.stack.core.types.structured.MonitoringParameters;
+import org.eclipse.milo.opcua.stack.core.types.structured.ReadValueId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.ref.WeakReference;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+/**
+ * The OCP-UA Session.
+ * This object should be used to read/write/stream data from/to an UA server.
+ *
+ * @author amarziali
+ */
 public class OpcUaSession implements OpcSession {
 
     private static final Logger logger = LoggerFactory.getLogger(OpcUaSession.class);
 
 
     private static final AtomicInteger clientHandleCounter = new AtomicInteger();
-    private final long refreshPeriodMillis;
+    private final Duration refreshPeriod;
+    private final Duration defaultPollPeriod;
+    private final Map<String, Duration> pollingMap;
     private final WeakReference<OpcUaClient> client;
     private final WeakReference<OpcUaOperations> creatingOperations;
     private UaSubscription subscription;
 
 
-    private OpcUaSession(OpcUaOperations creatingOperations, OpcUaClient client, long refreshPeriodMillis) throws Exception {
-        this.refreshPeriodMillis = refreshPeriodMillis;
+    private OpcUaSession(OpcUaOperations creatingOperations,
+                         OpcUaClient client,
+                         Duration refreshPeriod,
+                         Duration defaultPollingInterval,
+                         Map<String, Duration> pollingMap) throws Exception {
+        this.refreshPeriod = refreshPeriod;
+        this.defaultPollPeriod = defaultPollingInterval;
+        this.pollingMap = pollingMap;
         this.client = new WeakReference<>(client);
         this.creatingOperations = new WeakReference<>(creatingOperations);
     }
 
 
-    static OpcUaSession create(OpcUaClient client, long refreshPeriodMillis, OpcUaOperations creatingOperations) {
+    static OpcUaSession create(OpcUaOperations creatingOperations,
+                               OpcUaClient client,
+                               OpcUaSessionProfile sessionProfile) {
         try {
-            return new OpcUaSession(creatingOperations, client, refreshPeriodMillis);
+            return new OpcUaSession(creatingOperations, client,
+                    sessionProfile.getRefreshPeriod(),
+                    sessionProfile.getDefaultPollingInterval() != null ?
+                            sessionProfile.getDefaultPollingInterval() : sessionProfile.getRefreshPeriod(),
+                    sessionProfile.getPollingMap());
         } catch (Exception e) {
             throw new OpcException("Unable to create an OPC-UA session", e);
         }
     }
 
-    private synchronized void subscribeTo(String... tags) {
+    private synchronized UaSubscription subscription() {
         try {
             if (subscription == null && client.get() != null) {
-                subscription = client.get().getSubscriptionManager().createSubscription(refreshPeriodMillis).get();
+                subscription = client.get().getSubscriptionManager().createSubscription(Math.round(refreshPeriod.toNanos() / 1.0e6)).get();
             }
         } catch (Exception e) {
             throw new OpcException("Unable to create subscription", e);
         }
+        return this.subscription;
     }
 
 
@@ -129,9 +162,8 @@ public class OpcUaSession implements OpcSession {
 
 
     @Override
-    public Collection<OpcData> read(String... tags) {
+    public List<OpcData> read(String... tags) {
         OpcUaClient c = fetchValidClient();
-
         try {
             return c.readValues(0.0, TimestampsToReturn.Both, Arrays.stream(tags).map(NodeId::parseSafe)
                     .map(Optional::get).collect(Collectors.toList()))
@@ -157,15 +189,117 @@ public class OpcUaSession implements OpcSession {
 
 
     @Override
-    public Collection<OperationStatus> write(OpcData... data) {
-        //client.get().write
-        return Collections.emptyList();
+    public List<OperationStatus> write(OpcData... data) {
+        try {
+            return fetchValidClient().writeValues(
+                    Arrays.stream(data)
+                            .map(OpcData::getTag)
+                            .map(NodeId::parse)
+                            .collect(Collectors.toList()),
+                    Arrays.stream(data)
+                            .map(OpcData::getValue)
+                            .map(Variant::new)
+                            .map(DataValue::valueOnly)
+                            .collect(Collectors.toList())
+            ).thenApply(statusCodes -> statusCodes.stream()
+                    .map(OpcUaQualityExtractor::operationStatus)
+                    .collect(Collectors.toList())
+            ).get();
+        } catch (Exception e) {
+            throw new OpcException("Unable to successfully read tags", e);
+        }
 
     }
 
     @Override
     public Stream<OpcData> stream(String... tags) {
-        return null;
+        BlockingQueue<OpcData> transferQueue = new SynchronousQueue<>();
+        final List<UaMonitoredItem> results = new ArrayList<>();
+        final Duration defaultPollRate = defaultPollPeriod != null ? defaultPollPeriod : refreshPeriod;
+        final Map<String, Integer> handles = Arrays.stream(tags).collect(Collectors.toMap(Function.identity(), tag -> clientHandleCounter.incrementAndGet()));
+        final Map<Integer, String> reverseHandles = handles.entrySet().stream().collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey));
+
+        try {
+            //attach the consumer
+            final BiConsumer<UaMonitoredItem, DataValue> callback = (uaMonitoredItem1, dataValue) -> {
+                String tag = reverseHandles.get(uaMonitoredItem1.getClientHandle().intValue());
+                try {
+                    transferQueue.put(opcData(tag, dataValue));
+                } catch (Exception e) {
+                    logger.warn("Unable to properly map value for item " + tag, e);
+                }
+            };
+            results.addAll(subscription().createMonitoredItems(TimestampsToReturn.Both,
+                    Arrays.stream(tags).map(tag -> {
+                        Duration tagPollRate = pollingMap.getOrDefault(tag, defaultPollRate);
+                        return new MonitoredItemCreateRequest(
+                                new ReadValueId(NodeId.parse(tag), AttributeId.Value.uid(), null, QualifiedName.NULL_VALUE),
+                                MonitoringMode.Reporting,
+                                new MonitoringParameters(UInteger.valueOf(handles.get(tag)),
+                                        tagPollRate.toNanos() / 1.0e6,
+                                        null,
+                                        UInteger.valueOf(Math.round(Math.ceil((double) refreshPeriod.toNanos() / (double) defaultPollRate.toNanos())))
+                                        , true)
+                        );
+                    }).collect(Collectors.toList()),
+                    ((uaMonitoredItem, integer) -> {
+                        logger.info("Subscription for item {} with revised polling time {}",
+                                reverseHandles.get(uaMonitoredItem.getClientHandle().intValue()),
+                                uaMonitoredItem.getRevisedSamplingInterval());
+                        uaMonitoredItem.setValueConsumer(callback);
+                    })).get());
+
+            // check for any subscription failure.
+            results.stream()
+                    .filter(uaMonitoredItem -> !uaMonitoredItem.getStatusCode().isGood())
+                    .findFirst()
+                    .ifPresent(uaMonitoredItem -> {
+                        throw new OpcException(String.format("Failure training to monitoring item %s : %s",
+                                reverseHandles.get(uaMonitoredItem.getClientHandle().intValue()),
+                                Arrays.toString(StatusCodes.lookup(uaMonitoredItem.getStatusCode().getValue()).orElse(null))));
+                    });
+
+
+            return Stream.generate(() -> {
+                try {
+                    OpcData ret = null;
+                    while ((ret = transferQueue.poll(refreshPeriod.toNanos(), TimeUnit.NANOSECONDS)) == null) {
+                        if (subscription == null) {
+                            throw new OpcException("EOF reading tags. Disconnected");
+                        }
+                    }
+                    return ret;
+                } catch (InterruptedException ie) {
+                    throw new OpcException("Stream interrupted", ie);
+                }
+            }).onClose(() -> removeSubscriptions(results));
+
+        } catch (
+                Exception e)
+
+        {
+            try {
+                removeSubscriptions(results);
+            } finally {
+                throw new OpcException("Unable to stream requested tags", e);
+            }
+        }
+
+    }
+
+    private void removeSubscriptions(List<UaMonitoredItem> results) {
+        try {
+            List<StatusCode> removeResult = subscription.deleteMonitoredItems(results).get();
+            for (int i = 0; i < removeResult.size(); i++) {
+                if (!removeResult.get(i).isGood()) {
+                    logger.warn("Unable to properly unsubscribe for item {}: {}",
+                            results.get(i).getReadValueId().getNodeId().toParseableString(),
+                            StatusCodes.lookup(removeResult.get(i).getValue()));
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Unable to properly removed monitored items", e);
+        }
     }
 
 

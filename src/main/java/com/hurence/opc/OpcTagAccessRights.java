@@ -55,7 +55,7 @@ public class OpcTagAccessRights {
      *
      * @return
      */
-    public boolean isWriteble() {
+    public boolean isWritable() {
         return writable;
     }
 
@@ -64,7 +64,7 @@ public class OpcTagAccessRights {
      *
      * @param writeable
      */
-    public void setWriteble(boolean writeable) {
+    public void setWritable(boolean writeable) {
         this.writable = writeable;
     }
 

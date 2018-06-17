@@ -120,7 +120,7 @@ public class OpcTagInfo {
      * @return itself
      */
     public OpcTagInfo withWriteAccessRights(boolean writable) {
-        getAccessRights().setWriteble(writable);
+        getAccessRights().setWritable(writable);
         return this;
     }
 

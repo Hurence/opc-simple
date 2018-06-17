@@ -18,13 +18,18 @@
 package com.hurence.opc.ua;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcTagInfo;
+import com.hurence.opc.OperationStatus;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
 import org.eclipse.milo.opcua.stack.core.util.SelfSignedCertificateGenerator;
 import org.junit.*;
+import org.knowm.xchart.QuickChart;
+import org.knowm.xchart.SwingWrapper;
+import org.knowm.xchart.XYChart;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,7 +38,10 @@ import java.net.URI;
 import java.security.KeyPair;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -179,9 +187,89 @@ public class OpcUaOperationsTest {
         }
     }
 
+    @Test
+    public void testWrite() throws Exception {
+        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
+            opcUaOperations.connect(createConnectionProfile());
+            OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+                    .withRefreshPeriod(Duration.ofMillis(10)));
+            List<OperationStatus> result = session.write(
+                    new OpcData("ns=2;s=HelloWorld/Dynamic/Double", Instant.now(), 3.1415d),
+                    new OpcData("ns=2;s=sint", Instant.now(), true)
+            );
+            logger.info("Write result: {}", result);
+            Assert.assertFalse(result.isEmpty());
+            Assert.assertEquals(2, result.size());
+            Assert.assertEquals(OperationStatus.Level.INFO, result.get(0).getLevel());
+            Assert.assertEquals(OperationStatus.Level.ERROR, result.get(1).getLevel());
+        }
+    }
+
+    @Test
+    public void testStream() throws Exception {
+        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
+            opcUaOperations.connect(createConnectionProfile());
+            try (OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+                    .withDefaultPollingInterval(Duration.ofMillis(1))
+                    .withRefreshPeriod(Duration.ofMillis(100)))) {
+                final List<OpcData<Double>> values = new ArrayList<>();
+                session.stream("ns=2;s=sint").limit(1000).forEach(values::add);
+                logger.info("Received {} items", values.size());
+                values.stream().map(OpcData::getValue).forEach(System.err::println);
+                logger.info("Stream result: {}", values);
+            }
+        }
+    }
+
+    @Test
+    public void testStreamWithGraph() throws Exception {
+        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
+            opcUaOperations.connect(createProsysConnectionProfile());
+            try (OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+                    .withDefaultPollingInterval(Duration.ofMillis(10))
+                    .withRefreshPeriod(Duration.ofMillis(100)))) {
+
+                final long startTime = System.currentTimeMillis();
+                final List<OpcData<Double>> items = new ArrayList<>();
+
+
+                session.stream("ns=5;s=Sawtooth1").limit(200).forEach(items::add);
+                System.err.println(items.size());
+                // Create Chart
+                final XYChart chart = QuickChart.getChart("Simple XChart Real-time Demo", "Time", "Sine (f=1second)", "sine",
+                        items.stream().mapToDouble(d -> d.getTimestamp().toEpochMilli() - startTime).toArray(),
+                        items.stream().mapToDouble(OpcData::getValue).toArray());
+                // Show it
+                final SwingWrapper<XYChart> sw = new SwingWrapper<>(chart);
+                sw.displayChart();
+                Thread.sleep(200000);
+
+            }
+        }
+    }
+
+    @Test
+    @Ignore
+    public void testStreamFromProsys() throws Exception {
+        try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
+            opcUaOperations.connect(createProsysConnectionProfile());
+            try (OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
+                    .withDefaultPollingInterval(Duration.ofMillis(10))
+                    .withRefreshPeriod(Duration.ofMillis(100)))) {
+                final List<OpcData<Double>> values = new ArrayList<>();
+                session.stream("ns=5;s=Sawtooth1").limit(1000).forEach(values::add);
+
+                logger.info("Stream result: {}", values);
+                values.stream().map(OpcData::getTimestamp).forEach(System.err::println);
+
+            }
+        }
+    }
+
+
     @Ignore
     @Test
-    public void testReamdFromProsys() throws Exception {
+    public void testReadFromProsys() throws Exception {
         try (OpcUaOperations opcUaOperations = new OpcUaOperations()) {
             opcUaOperations.connect(createProsysConnectionProfile());
             OpcUaSession session = opcUaOperations.createSession(new OpcUaSessionProfile()
@@ -189,5 +277,6 @@ public class OpcUaOperationsTest {
             logger.info("Read tag {}", session.read("ns=5;s=Sawtooth1"));
         }
     }
+
 
 }

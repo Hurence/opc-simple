@@ -315,9 +315,12 @@ public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfil
                 }
             }
             getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
-            scheduler.shutdown();
-
-            client.disconnect().get();
+            if (scheduler != null) {
+                scheduler.shutdown();
+            }
+            if (client != null) {
+                client.disconnect().get();
+            }
         } catch (Exception e) {
             throw new OpcException("Unable to properly disconnect", e);
         } finally {
@@ -458,13 +461,13 @@ public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfil
                             //just swallow
                         }
                     }),
-                    vn.getAccessLevel().exceptionally(e -> null).whenCompleteAsync((accessLevel, e) -> {
+                    vn.getUserAccessLevel().exceptionally(e -> null).whenCompleteAsync((accessLevel, e) -> {
                         if (accessLevel != null) {
                             EnumSet<AccessLevel> levels = AccessLevel.fromMask(accessLevel);
                             info.withReadAccessRights(levels.contains(AccessLevel.CurrentRead));
                             info.withWriteAccessRights(levels.contains(AccessLevel.CurrentWrite));
                             //set the mask for more advanced usages
-                            info.addProperty(new OpcTagProperty<>(Integer.toString(AttributeId.AccessLevel.id()), AttributeId.AccessLevel.toString(), accessLevel.intValue()));
+                            info.addProperty(new OpcTagProperty<>(Integer.toString(AttributeId.UserAccessLevel.id()), AttributeId.UserAccessLevel.toString(), accessLevel.intValue()));
                         }
                     })
             ).get();
@@ -478,7 +481,9 @@ public class OpcUaOperations extends AbstractOpcOperations<OpcUaConnectionProfil
 
     @Override
     public OpcUaSession createSession(OpcUaSessionProfile sessionProfile) {
-        return OpcUaSession.create(client, sessionProfile.getRefreshPeriod().toMillis(), this);
+        OpcUaSession ret = OpcUaSession.create(this, client, sessionProfile);
+        sessions.add(ret);
+        return ret;
     }
 
     @Override

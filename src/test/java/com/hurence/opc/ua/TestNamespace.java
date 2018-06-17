@@ -20,22 +20,21 @@ package com.hurence.opc.ua;
 
 import org.eclipse.milo.opcua.sdk.core.AccessLevel;
 import org.eclipse.milo.opcua.sdk.core.Reference;
+import org.eclipse.milo.opcua.sdk.core.ValueRanks;
 import org.eclipse.milo.opcua.sdk.server.OpcUaServer;
 import org.eclipse.milo.opcua.sdk.server.api.*;
+import org.eclipse.milo.opcua.sdk.server.api.nodes.VariableNode;
 import org.eclipse.milo.opcua.sdk.server.model.nodes.objects.FolderNode;
 import org.eclipse.milo.opcua.sdk.server.model.nodes.variables.AnalogItemNode;
-import org.eclipse.milo.opcua.sdk.server.nodes.AttributeContext;
-import org.eclipse.milo.opcua.sdk.server.nodes.ServerNode;
-import org.eclipse.milo.opcua.sdk.server.nodes.UaFolderNode;
-import org.eclipse.milo.opcua.sdk.server.nodes.UaMethodNode;
+import org.eclipse.milo.opcua.sdk.server.nodes.*;
+import org.eclipse.milo.opcua.sdk.server.nodes.delegates.AttributeDelegate;
 import org.eclipse.milo.opcua.sdk.server.util.SubscriptionModel;
 import org.eclipse.milo.opcua.stack.core.Identifiers;
 import org.eclipse.milo.opcua.stack.core.StatusCodes;
 import org.eclipse.milo.opcua.stack.core.UaException;
 import org.eclipse.milo.opcua.stack.core.types.builtin.*;
-import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger;
+import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UByte;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UShort;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
 import org.eclipse.milo.opcua.stack.core.types.structured.Range;
 import org.eclipse.milo.opcua.stack.core.types.structured.ReadValueId;
@@ -56,12 +55,13 @@ public class TestNamespace implements Namespace {
 
     private final ServerNodeMap nodeMap;
     private final SubscriptionModel subscriptionModel;
+    private final NodeFactory nodeFactory;
 
     public TestNamespace(final UShort index, final OpcUaServer server) {
         this.index = index;
         this.nodeMap = server.getNodeMap();
         this.subscriptionModel = new SubscriptionModel(server, this);
-
+        this.nodeFactory = new NodeFactory(nodeMap, server.getObjectTypeManager(), server.getVariableTypeManager());
         registerItems();
     }
 
@@ -84,30 +84,52 @@ public class TestNamespace implements Namespace {
         // add single variable
 
         {
-            final AnalogItemNode variable = new AnalogItemNode(
-                    this.nodeMap,
-                    new NodeId(this.index, "sint"),
+            final AnalogItemNode variable = nodeFactory.createVariable(new NodeId(this.index, "sint"),
                     new QualifiedName(this.index, "SinT"),
-                    LocalizedText.english("Sin (t)"),
                     LocalizedText.english("Sinus of (t)"),
-                    UInteger.valueOf(AccessLevel.getMask(AccessLevel.READ_WRITE)),
-                    UInteger.valueOf(AccessLevel.getMask(AccessLevel.READ_WRITE))) {
+                    Identifiers.AnalogItemType,
+                    AnalogItemNode.class);
+            variable.setAttributeDelegate(new AttributeDelegate() {
 
                 @Override
-                public DataValue getValue() {
-                    return new DataValue(new Variant(Math.sin(System.currentTimeMillis() / 1000.0)),
+                public DataValue getValue(AttributeContext context, VariableNode node) throws UaException {
+                    return new DataValue(new Variant(Math.sin(2.0 * Math.PI * System.currentTimeMillis() / 1000.0)),
                             StatusCode.GOOD,
                             DateTime.now());
                 }
-            };
+            });
 
-            variable.setInstrumentRange(new Range(-1.0, +1.0));
+
+            variable.setInstrumentRange((new Range(-1.0, +1.0)));
             variable.setDataType(Identifiers.Double);
+            variable.setValueRank(ValueRanks.Scalar);
+            variable.setAccessLevel(UByte.valueOf(AccessLevel.getMask(AccessLevel.READ_ONLY)));
+            variable.setUserAccessLevel(UByte.valueOf(AccessLevel.getMask(AccessLevel.READ_ONLY)));
             variable.setDescription(LocalizedText.english("Sinusoid signal"));
-            variable.addReference(new Reference(variable.getNodeId(), Identifiers.HasTypeDefinition,
-                    Identifiers.AnalogItemType.expanded(),
-                    NodeClass.VariableType, true));
             folder.addOrganizes(variable);
+        }
+
+        // Dynamic Double
+        {
+            String name = "Double";
+            NodeId typeId = Identifiers.Double;
+            Variant variant = new Variant(0.0);
+
+            UaVariableNode node = new UaVariableNode.UaVariableNodeBuilder(nodeMap)
+                    .setNodeId(new NodeId(index, "HelloWorld/Dynamic/" + name))
+                    .setAccessLevel(UByte.valueOf(AccessLevel.getMask(AccessLevel.READ_WRITE)))
+                    .setUserAccessLevel(UByte.valueOf(AccessLevel.getMask(AccessLevel.READ_WRITE)))
+                    .setBrowseName(new QualifiedName(index, name))
+                    .setDisplayName(LocalizedText.english(name))
+                    .setDataType(typeId)
+                    .setTypeDefinition(Identifiers.BaseDataVariableType)
+                    .build();
+
+            node.setValue(new DataValue(variant));
+
+
+            nodeMap.addNode(node);
+            folder.addOrganizes(node);
         }
 
 
@@ -137,10 +159,21 @@ public class TestNamespace implements Namespace {
         final List<StatusCode> results = writeValues.stream()
                 .map(value -> {
                     if (this.nodeMap.containsKey(value.getNodeId())) {
-                        return new StatusCode(StatusCodes.Bad_NotWritable);
+                        try {
+                            nodeMap.getNode(value.getNodeId()).get().writeAttribute(
+                                    new AttributeContext(context.getServer(), context.getSession().orElse(null)),
+                                    value.getAttributeId(),
+                                    value.getValue(),
+                                    value.getIndexRange());
+
+                        } catch (UaException e) {
+                            return e.getStatusCode();
+                        }
+                        //server
                     } else {
                         return new StatusCode(StatusCodes.Bad_NodeIdUnknown);
                     }
+                    return StatusCode.GOOD;
                 })
                 .collect(Collectors.toList());
 

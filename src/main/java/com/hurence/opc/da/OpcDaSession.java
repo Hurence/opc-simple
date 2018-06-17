@@ -108,7 +108,7 @@ public class OpcDaSession implements OpcSession {
 
 
     @Override
-    public Collection<OpcData> read(String... tags) {
+    public List<OpcData> read(String... tags) {
         if (group == null) {
             throw new OpcException("Unable to read tags. Session has been detached!");
         }
@@ -141,7 +141,7 @@ public class OpcDaSession implements OpcSession {
 
 
     @Override
-    public Collection<OperationStatus> write(OpcData... data) {
+    public List<OperationStatus> write(OpcData... data) {
         if (group == null) {
             throw new OpcException("Unable to write tags. Session has been detached!");
         }
