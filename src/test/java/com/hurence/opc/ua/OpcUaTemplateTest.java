@@ -225,20 +225,21 @@ public class OpcUaTemplateTest {
     @Test
     public void testStreamWithGraph() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile());
+            opcUaTemplate.connect(createProsysConnectionProfile());
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withDefaultPollingInterval(Duration.ofMillis(10))
                     .withRefreshPeriod(Duration.ofMillis(100)))) {
 
                 final long startTime = System.currentTimeMillis();
                 final List<OpcData<Double>> items = new ArrayList<>();
-                session.stream("ns=2;s=sint").limit(200).forEach(items::add);
+                session.stream("ns=5;s=Sawtooth1").limit(200).forEach(items::add);
                 // Create Chart
                 final XYChart chart = QuickChart.getChart("Simple XChart Real-time Demo", "Time", "Sine (f=1second)", "sine",
                         items.stream().mapToDouble(d -> d.getTimestamp().toEpochMilli() - startTime).toArray(),
                         items.stream().mapToDouble(OpcData::getValue).toArray());
                 // Show it
                 final SwingWrapper<XYChart> sw = new SwingWrapper<>(chart);
+                sw.displayChart();
                 Thread.sleep(200000);
 
             }
@@ -270,7 +271,7 @@ public class OpcUaTemplateTest {
         try (OpcUaOperations opcUaTemplate = AutoReconnectOpcOperations.create(new OpcUaTemplate())) {
             opcUaTemplate.connect(createProsysConnectionProfile());
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withDefaultPollingInterval(Duration.ofMillis(100))
+                    .withDefaultPollingInterval(Duration.ofMillis(10))
                     .withRefreshPeriod(Duration.ofMillis(100)))) {
                 session.stream("ns=5;s=Sawtooth1").limit(1000).forEach(System.err::println);
                 //disconnect here
