@@ -114,6 +114,9 @@ public class OpcData<T> {
         this.value = value;
     }
 
+    public Quality getQuality() {
+        return quality;
+    }
 
     public void setQuality(Quality quality) {
         this.quality = quality;
