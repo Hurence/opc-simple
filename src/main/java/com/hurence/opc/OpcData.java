@@ -18,6 +18,7 @@
 package com.hurence.opc;
 
 import java.time.Instant;
+import java.util.Objects;
 
 /**
  * OPC data model.
@@ -128,6 +129,25 @@ public class OpcData<T> {
 
     public void setOperationStatus(OperationStatus operationStatus) {
         this.operationStatus = operationStatus;
+    }
+
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        OpcData<?> opcData = (OpcData<?>) o;
+        return Objects.equals(tag, opcData.tag) &&
+                Objects.equals(timestamp, opcData.timestamp) &&
+                quality == opcData.quality &&
+                Objects.equals(value, opcData.value) &&
+                Objects.equals(operationStatus, opcData.operationStatus);
+    }
+
+    @Override
+    public int hashCode() {
+
+        return Objects.hash(tag, timestamp, quality, value, operationStatus);
     }
 
     @Override
