@@ -20,6 +20,40 @@ Just trigger:
 mvn clean install
 ```
 
+### Include in your project (with maven)
+
+
+Add The maven dependency
+```
+
+<dependency>
+    <groupId>com.github.Hurence</groupId>
+    <artifactId>opc-simple</artifactId>
+    <version>1.2.0</version>
+</dependency>
+
+```
+
+
+And the needed repositories
+
+```
+
+    <repositories>
+        <repository>
+            <id>openscada</id>
+            <url>http://neutronium.openscada.org/maven/</url>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+        repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
+```
+
 ### Examples
 
 A step by step series of examples to showcase basic use cases.
@@ -27,7 +61,7 @@ A step by step series of examples to showcase basic use cases.
 
 ##### Connect to an OPC-DA server
 
-As a prerequisite you should have an up an running OCP-DA server. In this example we'll use the
+As a prerequisite you should have an up an running OPC-DA server. In this example we'll use the
 [Matrikon OPC simulation server](https://www.matrikonopc.com/products/opc-drivers/opc-simulation-server.aspx).
 
 Please feel free to change connection settings reflecting your real environment.
@@ -37,7 +71,8 @@ Please feel free to change connection settings reflecting your real environment.
 ```java
 
 
-   //create a connection profile
+   //create a connection profile   
+   
    OpcDaConnectionProfile connectionProfile = new OpcDaConnectionProfile()
          //change with the appropriate clsid
         .withComClsId("F8582CF2-88FB-11D0-B850-00C0F0104305")
@@ -50,7 +85,7 @@ Please feel free to change connection settings reflecting your real environment.
         .withSocketTimeout(Duration.of(5, ChronoUnit.SECONDS));
         
     //Create an instance of a da operations
-    OpcDaOperations opcDaOperations = new OpcDaOperations();
+    OpcDaOperations opcDaOperations = new OpcDaTemplate();
     //connect using our profile
     opcDaOperations.connect(connectionProfile);
     if (!opcDaOperations.awaitConnected()) {
@@ -60,6 +95,36 @@ Please feel free to change connection settings reflecting your real environment.
 
 ```
 
+
+##### Connect to an OPC-UA server
+
+As a prerequisite you should have an up an running OPC-UA server. In this example we'll use the
+[Prosys OPC-UA simulation server](https://www.prosysopc.com/products/opc-ua-simulation-server/).
+
+Please feel free to change connection settings reflecting your real environment.
+
+
+
+```java
+
+
+   //create a connection profile
+   OpcUaConnectionProfile connectionProfile = new new OpcUaConnectionProfile()
+      .withConnectionUri(URI.create("opc.tcp://localhost:53530/OPCUA/SimulationServer"))
+      .withClientIdUri("hurence:opc-simple:client:test")
+      .withClientName("Simple OPC test client")
+      .withSocketTimeout(Duration.ofSeconds(5));
+        
+    //Create an instance of a ua operations
+    OpcUaOperations opcUaOperations = new OpcUaTemplate();
+    //connect using our profile
+    opcUaOperations.connect(connectionProfile);
+    if (!opcUaOperations.awaitConnected()) {
+        throw new IllegalStateException("Unable to connect");
+    }
+        
+
+```
 
 #### Browse a list of tags
 
@@ -86,21 +151,45 @@ When creating a session you should specify the default item refresh rate.
 Depending on the OPC standard you are using, you can specify other properties (e.g. direct read from hardware for OPC-DA).
 
 Sessions should be created and released (beware leaks!) through the Connection obejct.
+
+> SessionProfile and OpcOperations interface extends AutoCloseable interface.
+> Hence you can use the handy *try-with-resources* syntax without taking care about destroying connection or sessions.
+
+
+##### Create an OPC-DA session
+
 An example:
 
 ````java
 
   OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+        // direct read from device
         .withDirectRead(false)
-        .withRefreshPeriodMillis(300);
+        // publication period
+        .withRefreshPeriod(Duration.ofMillis(100));
 
     try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
         //do something useful with your session
     }
 ````
 
-> SessionProfile and OpcOperations interface extends AutoCloseable interface.
-> Hence you can use the handy *try-with-resources* syntax without taking care about destroying connection or sessions.
+##### Create an OPC-UA session
+
+An example:
+
+````java
+
+  OpcUaSessionProfile sessionProfile = new OpcUaSessionProfile()
+        //the publication window
+        .withRefreshPeriod(Duration.ofMillis(100))
+        // the data polling interval
+        .withDefaultPollingInterval(Duration.ofMillis(10));
+
+        
+    try (OpcSession session = opcUaOperations.createSession(sessionProfile)) {
+        //do something useful with your session
+    }
+````
 
 #### Stream some tags readings
 
@@ -110,15 +199,16 @@ and as soon as possible print their values to stdout.
 ````java
     
     try {
-    session = opcDaOperations.createSession(sessionProfile);
-    session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
-            .forEach(System.out::println);
+        session = opcDaOperations.createSession(sessionProfile);
+        session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+                .forEach(System.out::println);
     } finally {
         opcDaOperations.releaseSession(session);
     }
 
 
 ````
+
 
 ## Authors
 
@@ -128,9 +218,10 @@ See also the list of [contributors](https://github.com/Hurence/opc-simple/contri
 
 ## License
 
-This project is licensed under the Apache 2.0 License - see the [LICENSE.md](LICENSE.md) file for details
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details
 
 ## Acknowledgments
 
 * Thanks to OpenSCADA and Utgard project contributors for their great work.
+* Thanks to Apache Milo for the great OPC-UA implementation.
 
