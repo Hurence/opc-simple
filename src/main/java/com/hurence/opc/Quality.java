@@ -15,14 +15,14 @@
  *
  */
 
-package com.hurence.opc.da;
-
-import com.hurence.opc.OpcOperations;
+package com.hurence.opc;
 
 /**
- * OPC-DA {@link com.hurence.opc.OpcOperations}
- *
- * @author amarziali
+ * The quality of a value
  */
-public interface OpcDaOperations extends OpcOperations<OpcDaConnectionProfile, OpcDaSessionProfile, OpcDaSession> {
+public enum Quality {
+    Good,
+    Uncertain,
+    Bad,
+    Unknown
 }

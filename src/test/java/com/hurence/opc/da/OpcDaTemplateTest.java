@@ -20,15 +20,19 @@ package com.hurence.opc.da;
 import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcSession;
 import com.hurence.opc.OpcTagInfo;
+import com.hurence.opc.OperationStatus;
+import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.util.AutoReconnectOpcOperations;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.Collection;
 
 /**
  * E2E test. You can run by spawning an OPC-DA test server and changing connection parameters to target it.
@@ -37,9 +41,9 @@ import java.util.Arrays;
  * @author amarziali
  */
 @Ignore
-public class OpcDaOperationsTest {
+public class OpcDaTemplateTest {
 
-    private final Logger logger = LoggerFactory.getLogger(OpcDaOperationsTest.class);
+    private final Logger logger = LoggerFactory.getLogger(OpcDaTemplateTest.class);
 
 
     private OpcDaOperations opcDaOperations;
@@ -47,14 +51,15 @@ public class OpcDaOperationsTest {
 
 
     @Before
-    public void init() {
-        opcDaOperations = new OpcDaOperations();
+    public void init() throws Exception {
+        opcDaOperations = new OpcDaTemplate();
         connectionProfile = new OpcDaConnectionProfile()
                 .withComClsId("F8582CF2-88FB-11D0-B850-00C0F0104305")
                 .withDomain("OPC-9167C0D9342")
-                .withUser("OPC")
-                .withPassword("opc")
-                .withHost("192.168.56.101")
+                .withCredentials(new UsernamePasswordCredentials()
+                        .withUser("OPC")
+                        .withPassword("opc"))
+                .withConnectionUri(new URI("opc.da://192.168.99.100:135"))
                 .withSocketTimeout(Duration.of(1, ChronoUnit.SECONDS));
 
         opcDaOperations.connect(connectionProfile);
@@ -79,10 +84,10 @@ public class OpcDaOperationsTest {
     public void listenToTags() throws Exception {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
 
         try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
-             session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+            session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
                     .limit(20)
                     .forEach(System.out::println);
 
@@ -93,21 +98,20 @@ public class OpcDaOperationsTest {
     public void testReadError() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
             session = opcDaOperations.createSession(sessionProfile);
             OpcData<String> result = null;
 
-            int lastQuality = 0;
-            while (lastQuality < 100) {
+            OperationStatus lastQuality;
+            do {
                 result = session.read("Read Error.String").stream().findFirst().get();
                 System.out.println(result);
-                lastQuality = result.getQuality();
-            }
-            Assert.assertTrue(result.getErrorCode().isPresent());
-            System.out.println("Received error : " + result.getErrorCode().get());
+                lastQuality = result.getOperationStatus();
+            } while (lastQuality.getLevel() != OperationStatus.Level.INFO);
+            System.out.println("Received error : " + result.getOperationStatus());
 
         } finally {
             opcDaOperations.releaseSession(session);
@@ -119,7 +123,7 @@ public class OpcDaOperationsTest {
     public void listenToArray() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
@@ -138,12 +142,12 @@ public class OpcDaOperationsTest {
     public void listenToAll() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
             session = opcDaOperations.createSession(sessionProfile);
-            session.stream(opcDaOperations.browseTags().stream().map(OpcTagInfo::getName).toArray(a -> new String[a]))
+            session.stream(opcDaOperations.browseTags().stream().map(OpcTagInfo::getId).toArray(a -> new String[a]))
                     .limit(100)
                     .forEach(System.out::println);
         } finally {
@@ -155,12 +159,18 @@ public class OpcDaOperationsTest {
     public void testWriteValues() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
             session = opcDaOperations.createSession(sessionProfile);
-            Assert.assertTrue(session.write(new OpcData("Square Waves.Real8", Instant.now(), 120, 123.31)));
+            Collection<OperationStatus> result =
+                    session.write(new OpcData<>("Square Waves.Real8", Instant.now(), 123.31));
+            logger.info("Write result: {}", result);
+            Assert.assertTrue(result
+                    .stream().noneMatch(operationStatus -> operationStatus.getLevel() != OperationStatus.Level.INFO));
+
+
         } finally {
             opcDaOperations.releaseSession(session);
         }
@@ -170,12 +180,15 @@ public class OpcDaOperationsTest {
     public void testWriteValuesFails() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriodMillis(300);
+                .withRefreshPeriod(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
             session = opcDaOperations.createSession(sessionProfile);
-            Assert.assertFalse(session.write(new OpcData("Square Waves.Real8", Instant.now(), 120, "I'm not a number")));
+            Collection<OperationStatus> result = session.write(new OpcData("Square Waves.Real8", Instant.now(), "I'm not a number"));
+            logger.info("Write result: {}", result);
+            Assert.assertFalse(result.stream()
+                    .noneMatch(operationStatus -> operationStatus.getLevel() != OperationStatus.Level.INFO));
         } finally {
             opcDaOperations.releaseSession(session);
         }
@@ -183,7 +196,7 @@ public class OpcDaOperationsTest {
 
     @Test
     public void testAutoReconnect() throws Exception {
-        AutoReconnectOpcOperations autoReconnectOpcOperations = new AutoReconnectOpcOperations(opcDaOperations);
+        OpcDaOperations autoReconnectOpcOperations = AutoReconnectOpcOperations.create(opcDaOperations);
         opcDaOperations.disconnect();
         autoReconnectOpcOperations.connect(connectionProfile);
         Assert.assertTrue(autoReconnectOpcOperations.awaitConnected());

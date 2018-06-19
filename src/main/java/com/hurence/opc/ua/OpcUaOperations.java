@@ -15,14 +15,14 @@
  *
  */
 
-package com.hurence.opc.da;
+package com.hurence.opc.ua;
 
 import com.hurence.opc.OpcOperations;
 
 /**
- * OPC-DA {@link com.hurence.opc.OpcOperations}
+ * OPC-UA {@link OpcOperations} interface.
  *
  * @author amarziali
  */
-public interface OpcDaOperations extends OpcOperations<OpcDaConnectionProfile, OpcDaSessionProfile, OpcDaSession> {
+public interface OpcUaOperations extends OpcOperations<OpcUaConnectionProfile, OpcUaSessionProfile, OpcUaSession> {
 }

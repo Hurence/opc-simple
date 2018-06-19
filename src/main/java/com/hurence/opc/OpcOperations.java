@@ -40,6 +40,14 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
      */
     void disconnect();
 
+
+    /**
+     * Check whenever the connection has been established under a secure layer (e.g. ssl).
+     *
+     * @return true if the connection transport layer can be considered as secure. False otherwise.
+     */
+    boolean isChannelSecured();
+
     /**
      * Retrieves the state of the current connection.
      *

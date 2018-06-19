@@ -20,12 +20,12 @@ package com.hurence.opc.da;
 import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcOperations;
 import com.hurence.opc.OpcSession;
+import com.hurence.opc.OperationStatus;
 import com.hurence.opc.exception.OpcException;
 import org.jinterop.dcom.common.JIException;
 import org.jinterop.dcom.core.JIVariant;
 import org.openscada.opc.dcom.common.KeyedResult;
 import org.openscada.opc.dcom.common.KeyedResultSet;
-import org.openscada.opc.dcom.common.Result;
 import org.openscada.opc.dcom.common.ResultSet;
 import org.openscada.opc.dcom.da.OPCDATASOURCE;
 import org.openscada.opc.dcom.da.OPCITEMDEF;
@@ -62,9 +62,9 @@ public class OpcDaSession implements OpcSession {
     private OPCSyncIO syncIO;
     private OPCItemMgt opcItemMgt;
     private OPCDATASOURCE datasource;
-    private final WeakReference<OpcDaOperations> creatingOperations;
+    private final WeakReference<OpcDaTemplate> creatingOperations;
 
-    private OpcDaSession(OpcDaOperations creatingOperations, OPCGroupStateMgt group, OPCDATASOURCE datasource,
+    private OpcDaSession(OpcDaTemplate creatingOperations, OPCGroupStateMgt group, OPCDATASOURCE datasource,
                          long refreshPeriodMillis) throws JIException {
         this.group = group;
         this.opcItemMgt = group.getItemManagement();
@@ -74,7 +74,7 @@ public class OpcDaSession implements OpcSession {
         this.creatingOperations = new WeakReference<>(creatingOperations);
     }
 
-    static OpcDaSession create(OPCServer server, long refreshPeriodMillis, boolean directRead, OpcDaOperations creatingOperations) {
+    static OpcDaSession create(OPCServer server, long refreshPeriodMillis, boolean directRead, OpcDaTemplate creatingOperations) {
         try {
             return new OpcDaSession(creatingOperations,
                     server.addGroup(null, true,
@@ -108,7 +108,7 @@ public class OpcDaSession implements OpcSession {
 
 
     @Override
-    public Collection<OpcData> read(String... tags) {
+    public List<OpcData> read(String... tags) {
         if (group == null) {
             throw new OpcException("Unable to read tags. Session has been detached!");
         }
@@ -126,8 +126,9 @@ public class OpcDaSession implements OpcSession {
                         try {
                             return new OpcData<>(mapsToClientHandles.get(value.getClientHandle()),
                                     value.getTimestamp().asBigDecimalCalendar().toInstant(),
-                                    value.getQuality(), JIVariantMarshaller.toJavaType(value.getValue()),
-                                    JIVariantMarshaller.extractError(value.getValue()));
+                                    OpcDaQualityExtractor.quality(value.getQuality()),
+                                    JIVariantMarshaller.toJavaType(value.getValue()),
+                                    OpcDaQualityExtractor.operationStatus(value.getQuality()));
                         } catch (JIException e) {
                             throw new OpcException("Unable to read tag " + value, e);
                         }
@@ -140,7 +141,7 @@ public class OpcDaSession implements OpcSession {
 
 
     @Override
-    public boolean write(OpcData... data) {
+    public List<OperationStatus> write(OpcData... data) {
         if (group == null) {
             throw new OpcException("Unable to write tags. Session has been detached!");
         }
@@ -148,14 +149,9 @@ public class OpcDaSession implements OpcSession {
             ResultSet<WriteRequest> result = syncIO.write(Arrays.stream(data)
                     .map(d -> new WriteRequest(resolveItemHandles(d.getTag()).getKey(), JIVariant.makeVariant(d.getValue())))
                     .toArray(a -> new WriteRequest[a]));
-            if (result != null) {
-                boolean failed = result.stream().anyMatch(Result::isFailed);
-                if (failed) {
-                    result.stream().filter(Result::isFailed).forEach(f -> logger.warn("Error {} writing tag handle {}", f.getErrorCode(), f.getValue().getServerHandle()));
-                    return false;
-                }
-            }
-            return true;
+            return result.stream()
+                    .map(OpcDaQualityExtractor::operationStatus)
+                    .collect(Collectors.toList());
         } catch (Exception e) {
             throw new OpcException("Unable to write data", e);
         }

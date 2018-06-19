@@ -40,30 +40,6 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
      */
     private String domain;
 
-    /**
-     * The user name.
-     */
-    private String user;
-    /**
-     * The password to authenticate the user on the provided domain.
-     */
-    private String password;
-
-    public String getUser() {
-        return user;
-    }
-
-    public void setUser(String user) {
-        this.user = user;
-    }
-
-    public String getPassword() {
-        return password;
-    }
-
-    public void setPassword(String password) {
-        this.password = password;
-    }
 
     public String getComClsId() {
         return comClsId;
@@ -106,25 +82,12 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
     }
 
 
-    public OpcDaConnectionProfile withUser(String user) {
-        setUser(user);
-        return this;
-    }
-
-    public OpcDaConnectionProfile withPassword(String password) {
-        setPassword(password);
-        return this;
-    }
-
-
     @Override
     public String toString() {
         return "OpcDaConnectionProfile{" +
                 "comClsId='" + comClsId + '\'' +
                 ", comProgId='" + comProgId + '\'' +
                 ", domain='" + domain + '\'' +
-                ", user='" + user + '\'' +
-                ", password='**********'" +
                 '}';
     }
 }

@@ -17,6 +17,8 @@
 
 package com.hurence.opc;
 
+import java.time.Duration;
+
 /**
  * Base class carrying information about a session.
  *
@@ -25,33 +27,39 @@ package com.hurence.opc;
 public abstract class SessionProfile<T extends SessionProfile> {
 
     /**
-     * The item requested refresh period in milliseconds. The server may not support as low as you set.
+     * The item requested refresh period. The server may not support as low as you set.
      * In this case the value will be refreshed at the server rate.
      * If you need a very low refresh delay, please consider use direct read mode.
      * Defaults to 1 second.
      */
-    private long refreshPeriodMillis = 1000;
+    private Duration refreshPeriod = Duration.ofSeconds(1);
 
-    public final long getRefreshPeriodMillis() {
-        return refreshPeriodMillis;
+    public final Duration getRefreshPeriod() {
+        return refreshPeriod;
     }
 
-    public final void setRefreshPeriodMillis(long refreshPeriodMillis) {
-        if (refreshPeriodMillis <= 0) {
-            throw new IllegalArgumentException("refreshPeriodMillis must be any non-negative value ");
+    public final void setRefreshPeriod(Duration refreshPeriod) {
+        if (refreshPeriod == null) {
+            throw new IllegalArgumentException("The refresh period must be any non null valid value.");
         }
-        this.refreshPeriodMillis = refreshPeriodMillis;
+        this.refreshPeriod = refreshPeriod;
     }
 
-    public final T withRefreshPeriodMillis(long refreshPeriodMillis) {
-        setRefreshPeriodMillis(refreshPeriodMillis);
+    /**
+     * Sets the refresh period.
+     *
+     * @param refreshPeriod the refresh period (non null).
+     * @return itself.
+     */
+    public final T withRefreshPeriod(Duration refreshPeriod) {
+        setRefreshPeriod(refreshPeriod);
         return (T) this;
     }
 
     @Override
     public String toString() {
         return "SessionProfile{" +
-                "refreshPeriodMillis=" + refreshPeriodMillis +
+                "refreshPeriod=" + refreshPeriod +
                 '}';
     }
 }

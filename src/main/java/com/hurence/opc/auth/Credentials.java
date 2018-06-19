@@ -15,14 +15,20 @@
  *
  */
 
-package com.hurence.opc.da;
-
-import com.hurence.opc.OpcOperations;
+package com.hurence.opc.auth;
 
 /**
- * OPC-DA {@link com.hurence.opc.OpcOperations}
+ * Generic interface to be subclassed by implementations.
+ * No operations defined here
  *
  * @author amarziali
  */
-public interface OpcDaOperations extends OpcOperations<OpcDaConnectionProfile, OpcDaSessionProfile, OpcDaSession> {
+public interface Credentials {
+
+    /**
+     * Anonymous credentials.
+     */
+    Credentials ANONYMOUS_CREDENTIALS = new Credentials() {
+    };
+
 }
