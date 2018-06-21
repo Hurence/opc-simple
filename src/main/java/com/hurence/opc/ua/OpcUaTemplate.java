@@ -162,13 +162,15 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
                 .setApplicationName(LocalizedText.english(connectionProfile.getClientName()))
                 .setApplicationUri(connectionProfile.getClientIdUri())
                 .setEndpoint(findMatchingEndpoint(
-                        discoverEndpoints(connectionProfile.getConnectionUri().toString(), connectionProfile.getSocketTimeout()),
+                        discoverEndpoints(connectionProfile.getConnectionUri().toString(),
+                                Optional.ofNullable(connectionProfile.getSocketTimeout())),
                         connectionProfile.getSecureChannelEncryption() != null ? null : SecurityPolicy.None)
                         .orElseThrow(() -> new OpcException("Unable to find a matching endpoint. Please check server requirements")))
-                .setRequestTimeout(UInteger.valueOf(connectionProfile.getSocketTimeout().toMillis()))
                 .setIdentityProvider(resolveIdentityProvider(connectionProfile.getCredentials())
                         .orElseThrow(() -> new OpcException("Unrecognised Credentials " + connectionProfile.getCredentials())));
-
+        if (connectionProfile.getSocketTimeout() != null) {
+            ret.setRequestTimeout(UInteger.valueOf(connectionProfile.getSocketTimeout().toMillis()));
+        }
         // Set secure layer certificates if required
         if (connectionProfile.getSecureChannelEncryption() != null) {
             X509Credentials x509 = connectionProfile.getSecureChannelEncryption();
@@ -222,11 +224,11 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
      * @param timeout   the request timeout
      * @return a never null list of {@link EndpointDescription}. Empty in case of issues.
      */
-    private Collection<EndpointDescription> discoverEndpoints(String serverUrl, Duration timeout) {
+    private Collection<EndpointDescription> discoverEndpoints(String serverUrl, Optional<Duration> timeout) {
         Collection<EndpointDescription> ret = Collections.emptyList();
         try {
             logger.info("Discovering OCP-UA endpoints from {}", serverUrl);
-            EndpointDescription[] response = UaTcpStackClient.getEndpoints(serverUrl).get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            EndpointDescription[] response = UaTcpStackClient.getEndpoints(serverUrl).get(timeout.orElse(Duration.ofSeconds(30)).toMillis(), TimeUnit.MILLISECONDS);
             if (response == null || response.length == 0) {
                 logger.warn("Received empty endpoint descriptions from {}", serverUrl);
             } else {
