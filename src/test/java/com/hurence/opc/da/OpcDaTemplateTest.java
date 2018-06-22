@@ -81,6 +81,12 @@ public class OpcDaTemplateTest {
     }
 
     @Test
+    public void testFetchMetadata() {
+        opcDaOperations.fetchMetadata("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+                .forEach(System.out::println);
+    }
+
+    @Test
     public void listenToTags() throws Exception {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)

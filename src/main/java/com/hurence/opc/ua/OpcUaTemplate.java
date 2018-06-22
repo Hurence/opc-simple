@@ -50,8 +50,14 @@ import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
 import org.eclipse.milo.opcua.stack.core.types.builtin.LocalizedText;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.BrowseDirection;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.BrowseResultMask;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.ServerState;
+import org.eclipse.milo.opcua.stack.core.types.structured.BrowseDescription;
+import org.eclipse.milo.opcua.stack.core.types.structured.BrowseResult;
 import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
+import org.eclipse.milo.opcua.stack.core.types.structured.ReferenceDescription;
 import org.eclipse.milo.opcua.stack.core.util.CertificateUtil;
 import org.eclipse.milo.opcua.stack.core.util.CryptoRestrictions;
 import org.slf4j.Logger;
@@ -334,6 +340,43 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             client = null;
         }
     }
+
+    @Override
+    public Collection<OpcTagInfo> fetchMetadata(String... tagIds) {
+        Collection<OpcTagInfo> ret = new ArrayList<>();
+        for (String t : tagIds) {
+            try {
+                NodeId target = NodeId.parse(t);
+                Node node = client.getAddressSpace().createNode(target).get();
+                //build the path first
+                LinkedList<String> path = new LinkedList<>();
+                while (target != null) {
+                    BrowseResult browseResult = client.browse(new BrowseDescription(target, BrowseDirection.Inverse, Identifiers.References, true,
+                            UInteger.valueOf(NodeClass.Object.getValue() | NodeClass.Variable.getValue()),
+                            UInteger.valueOf(BrowseResultMask.All.getValue()))).get();
+                    ReferenceDescription next = Arrays.stream(browseResult.getReferences()).findFirst().orElse(null);
+                    if (next != null && next.getNodeId().isLocal() && !Identifiers.RootFolder.equals(next.getNodeId().local().get())) {
+                        path.addFirst(next.getBrowseName().getName());
+                        target = next.getNodeId().local().get();
+                    } else {
+                        target = null;
+                    }
+                }
+                Stack<Node> toProcess = new Stack<>();
+                toProcess.push(node);
+                List<OpcTagInfo> tmp = new ArrayList<>();
+                browse(toProcess, null, tmp);
+                if (!tmp.isEmpty()) {
+                    ret.add(tmp.get(0).withGroup(path.stream().collect(Collectors.joining("."))));
+                }
+            } catch (Exception e) {
+                throw new OpcException("Unable to fetch metadata for tag " + t, e);
+            }
+        }
+
+        return ret;
+    }
+
 
     /**
      * Internally browse the whole tag tree with a DFS algorithm.

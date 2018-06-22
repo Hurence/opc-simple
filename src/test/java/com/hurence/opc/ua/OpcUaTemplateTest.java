@@ -176,6 +176,17 @@ public class OpcUaTemplateTest {
     }
 
     @Test
+    public void testFetchMetadata() throws Exception {
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile());
+            Collection<OpcTagInfo> ret = opcUaTemplate.fetchMetadata("ns=2;s=sint");
+            logger.info("Metadata: {}", ret);
+            Assert.assertEquals(1, ret.size());
+            Assert.assertEquals("Objects.TestFolder", ret.stream().findFirst().get().getGroup());
+        }
+    }
+
+    @Test
     public void testRead() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createConnectionProfile());

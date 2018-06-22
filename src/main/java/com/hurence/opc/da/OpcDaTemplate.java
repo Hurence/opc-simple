@@ -243,6 +243,11 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         return null;
     }
 
+    @Override
+    public Collection<OpcTagInfo> fetchMetadata(String... tagIds) {
+        Set<String> filter = Arrays.stream(tagIds).collect(Collectors.toSet());
+        return browseTags().stream().filter(tag -> filter.contains(tag.getId())).collect(Collectors.toList());
+    }
 
     @Override
     public Collection<OpcTagInfo> browseTags() {

@@ -132,6 +132,11 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     }
 
     @Override
+    public Collection<OpcTagInfo> fetchMetadata(String... tagIds) {
+        return delegate.fetchMetadata(tagIds);
+    }
+
+    @Override
     public ConnectionState getConnectionState() {
         return delegate.getConnectionState();
     }

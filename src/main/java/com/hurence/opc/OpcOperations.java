@@ -63,6 +63,14 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
      */
     Collection<OpcTagInfo> browseTags();
 
+    /**
+     * Fetch metadata of provided items.
+     * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
+     *
+     * @param tagIds the id of tags to fetch.
+     * @return a never null {@link Collection}
+     */
+    Collection<OpcTagInfo> fetchMetadata(String... tagIds);
 
     /**
      * Create a new {@link OpcSession} and attach to the current connection.
