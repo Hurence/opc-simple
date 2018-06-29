@@ -17,7 +17,7 @@
 
 package com.hurence.opc;
 
-import java.util.Collection;
+import java.util.List;
 import java.util.stream.Stream;
 
 /**
@@ -35,16 +35,16 @@ public interface OpcSession extends AutoCloseable {
      * @param tags the list of tags.
      * @return the values that have been read.
      */
-    Collection<OpcData> read(String... tags);
+    List<OpcData> read(String... tags);
 
     /**
      * Synchronously writes a list of tags and return as soon as possible.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
      *
      * @param data the data to be written.
-     * @return true if operation is successful, false otherwise
+     * @return the status of each write operation.
      */
-    boolean write(OpcData... data);
+    List<OperationStatus> write(OpcData... data);
 
     /**
      * Continuously read a stream of tags.

@@ -40,6 +40,14 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
      */
     void disconnect();
 
+
+    /**
+     * Check whenever the connection has been established under a secure layer (e.g. ssl).
+     *
+     * @return true if the connection transport layer can be considered as secure. False otherwise.
+     */
+    boolean isChannelSecured();
+
     /**
      * Retrieves the state of the current connection.
      *
@@ -55,6 +63,14 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
      */
     Collection<OpcTagInfo> browseTags();
 
+    /**
+     * Fetch metadata of provided items.
+     * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
+     *
+     * @param tagIds the id of tags to fetch.
+     * @return a never null {@link Collection}
+     */
+    Collection<OpcTagInfo> fetchMetadata(String... tagIds);
 
     /**
      * Create a new {@link OpcSession} and attach to the current connection.

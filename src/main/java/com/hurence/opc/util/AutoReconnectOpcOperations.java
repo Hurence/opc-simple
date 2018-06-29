@@ -21,9 +21,9 @@ import com.hurence.opc.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Proxy;
 import java.util.Collection;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Utility class delegating operations to a standard {@link OpcOperations} implementation but automatically reconnecting
@@ -52,12 +52,36 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     private final OpcOperations<S, T, U> delegate;
 
     /**
+     * Create a new dynamic proxy instance allowing for seamless automatic reconnection.
+     *
+     * @param delegate the {@link OpcOperations} to decorate.
+     * @return the decorated instance.
+     */
+    @SuppressWarnings("unchecked")
+    public static <O extends OpcOperations> O create(final O delegate) {
+        final AutoReconnectOpcOperations toProxy = new AutoReconnectOpcOperations(delegate);
+        return (O) Proxy.newProxyInstance(delegate.getClass().getClassLoader(),
+                delegate.getClass().getInterfaces(),
+                (proxy, method, args) -> {
+                    try {
+                        return toProxy.getClass().getMethod(method.getName(), method.getParameterTypes())
+                                .invoke(toProxy, args);
+                    } catch (NoSuchMethodException e) {
+                        return delegate.getClass().getMethod(method.getName(), method.getParameterTypes())
+                                .invoke(delegate, args);
+                    }
+                });
+    }
+
+
+    /**
      * Construct an instance.
      *
      * @param delegate the delegate
      */
-    public AutoReconnectOpcOperations(OpcOperations<S, T, U> delegate) {
+    private AutoReconnectOpcOperations(OpcOperations<S, T, U> delegate) {
         this.delegate = delegate;
+
     }
 
     @Override
@@ -65,7 +89,7 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
         delegate.connect(connectionProfile);
         //if no error we'll run our keepalive loop.
         if (executorService == null) {
-            executorService = Executors.newSingleThreadExecutor();
+            executorService = SingleThreadedExecutorServiceFactory.instance().createScheduler();
             shouldKeepAlive = true;
             executorService.execute(() -> {
                 while (shouldKeepAlive) {
@@ -108,6 +132,11 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     }
 
     @Override
+    public Collection<OpcTagInfo> fetchMetadata(String... tagIds) {
+        return delegate.fetchMetadata(tagIds);
+    }
+
+    @Override
     public ConnectionState getConnectionState() {
         return delegate.getConnectionState();
     }
@@ -140,5 +169,10 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     @Override
     public void close() throws Exception {
         delegate.close();
+    }
+
+    @Override
+    public boolean isChannelSecured() {
+        return delegate.isChannelSecured();
     }
 }
