@@ -390,7 +390,13 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
      */
     private void browse(Stack<Node> path, OpcTagInfo prevTagInfo, Collection<OpcTagInfo> result) throws Exception {
         Node n = path.isEmpty() ? null : path.peek();
-        NodeId current = n == null ? Identifiers.RootFolder : n.getNodeId().get();
+        NodeId current = null;
+        try {
+            current = n == null ? Identifiers.RootFolder : n.getNodeId().get();
+        } catch (Exception e) {
+            logger.warn("Unable to read after tag {} : {}", prevTagInfo, e.getMessage());
+            return;
+        }
 
         OpcTagInfo currentTagInfo = null;
 
@@ -473,9 +479,10 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             //final VariableNode vn = client.getAddressSpace().createVariableNode(ref.getNodeId().local().get());
 
             CompletableFuture.allOf(
-                    vn.getMinimumSamplingInterval().exceptionally(e -> null).whenCompleteAsync((d, e) -> {
+                    vn.readMinimumSamplingInterval().exceptionally(e -> null).whenCompleteAsync((raw, e) -> {
+                        Number d = (Number) UaVariantMarshaller.toJavaType(raw);
                         info.setScanRate(Optional.ofNullable(
-                                d != null && d > 0.0 ? Duration.ofNanos(Math.round(d * 1e6)) : null));
+                                d != null && d.doubleValue() > 0.0 ? Duration.ofNanos(Math.round(d.doubleValue() * 1e6)) : null));
                         if (d != null) {
                             info.addProperty(new OpcTagProperty<>(Integer.toString(AttributeId.MinimumSamplingInterval.id()),
                                     AttributeId.MinimumSamplingInterval.toString(),
