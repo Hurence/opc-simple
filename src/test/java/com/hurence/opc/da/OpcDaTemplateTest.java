@@ -81,6 +81,12 @@ public class OpcDaTemplateTest {
     }
 
     @Test
+    public void testFetchLeaves() {
+        opcDaOperations.fetchNextTreeLevel("Square Waves")
+                .forEach(System.out::println);
+    }
+
+    @Test
     public void testFetchMetadata() {
         opcDaOperations.fetchMetadata("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
                 .forEach(System.out::println);
@@ -116,7 +122,7 @@ public class OpcDaTemplateTest {
                 result = session.read("Read Error.String").stream().findFirst().get();
                 System.out.println(result);
                 lastQuality = result.getOperationStatus();
-            } while (lastQuality.getLevel() != OperationStatus.Level.INFO);
+            } while (lastQuality.getLevel() == OperationStatus.Level.INFO);
             System.out.println("Received error : " + result.getOperationStatus());
 
         } finally {

@@ -165,8 +165,7 @@ public class OpcUaTemplateTest {
             ObjectMapper mapper = new ObjectMapper();
             mapper.findAndRegisterModules();
             logger.info("{}", mapper.writeValueAsString(ret));
-            Optional<OpcTagInfo> sint = ret.stream().filter(t -> "SinT".equals(t.getName()) &&
-                    "Objects.TestFolder".equals(t.getGroup()))
+            Optional<OpcTagInfo> sint = ret.stream().filter(t -> "SinT".equals(t.getName()))
                     .findFirst();
             Assert.assertTrue(sint.isPresent());
             Assert.assertFalse(ret.isEmpty());
@@ -182,7 +181,7 @@ public class OpcUaTemplateTest {
             Collection<OpcTagInfo> ret = opcUaTemplate.fetchMetadata("ns=2;s=sint");
             logger.info("Metadata: {}", ret);
             Assert.assertEquals(1, ret.size());
-            Assert.assertEquals("Objects.TestFolder", ret.stream().findFirst().get().getGroup());
+
         }
     }
 
@@ -227,6 +226,15 @@ public class OpcUaTemplateTest {
                 values.stream().map(OpcData::getValue).forEach(System.err::println);
                 logger.info("Stream result: {}", values);
             }
+        }
+    }
+
+    @Test
+    public void testfetchNextTreeLevel() throws Exception {
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile());
+            Assert.assertEquals(2, opcUaTemplate.fetchNextTreeLevel("ns=2;i=1").size());
+            Assert.assertTrue(opcUaTemplate.fetchNextTreeLevel("ns=2;s=sint").isEmpty());
         }
     }
 

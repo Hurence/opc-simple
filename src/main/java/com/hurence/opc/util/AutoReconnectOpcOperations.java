@@ -147,6 +147,11 @@ public class AutoReconnectOpcOperations<S extends ConnectionProfile<S>, T extend
     }
 
     @Override
+    public Collection<OpcObjectInfo> fetchNextTreeLevel(String rootTagId) {
+        return delegate.fetchNextTreeLevel(rootTagId);
+    }
+
+    @Override
     public U createSession(T sessionProfile) {
         return delegate.createSession(sessionProfile);
     }

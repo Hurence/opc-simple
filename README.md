@@ -135,6 +135,19 @@ Assuming a connection is already in place, just browse the tags and print to std
     opcDaOperations.browseTags().foreach(System.out::println);
 ````
 
+
+#### Browse the tree branch by branch
+
+Sometimes browsing the whole tree is too much time and resource consuming.
+As an alternative you can browse level by level. 
+
+For instance you can browse what's inside the group _Square Waves_:
+````java
+
+    opcDaOperations.fetchNextTreeLevel("Square Waves")
+                                    .forEach(System.out::println);
+````
+
 #### Using Sessions
 
 Session are stateful abstractions sharing Connection. 

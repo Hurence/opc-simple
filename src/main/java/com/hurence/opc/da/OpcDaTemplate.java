@@ -24,14 +24,12 @@ import com.hurence.opc.exception.OpcException;
 import com.hurence.opc.util.ExecutorServiceFactory;
 import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
 import org.jinterop.dcom.common.JIException;
+import org.jinterop.dcom.common.JISystem;
 import org.jinterop.dcom.core.*;
 import org.openscada.opc.dcom.common.KeyedResult;
 import org.openscada.opc.dcom.common.KeyedResultSet;
 import org.openscada.opc.dcom.common.impl.EnumString;
-import org.openscada.opc.dcom.da.OPCBROWSETYPE;
-import org.openscada.opc.dcom.da.OPCSERVERSTATE;
-import org.openscada.opc.dcom.da.OPCSERVERSTATUS;
-import org.openscada.opc.dcom.da.PropertyDescription;
+import org.openscada.opc.dcom.da.*;
 import org.openscada.opc.dcom.da.impl.OPCItemProperties;
 import org.openscada.opc.dcom.da.impl.OPCServer;
 import org.slf4j.Logger;
@@ -52,6 +50,11 @@ import java.util.stream.Collectors;
  */
 public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile, OpcDaSessionProfile, OpcDaSession>
         implements OpcDaOperations {
+
+    static {
+        //enable surrogates auto-registration
+        JISystem.setAutoRegisteration(true);
+    }
 
     private static final Logger logger = LoggerFactory.getLogger(OpcDaTemplate.class);
 
@@ -213,14 +216,6 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     }
 
 
-    private String groupFromId(String tag) {
-        int idx = tag.lastIndexOf('.');
-        if (idx > 0) {
-            return tag.substring(0, idx);
-        }
-        return "";
-    }
-
     private String nameFromId(String tag) {
         int idx = tag.lastIndexOf('.');
         if (idx > 0) {
@@ -245,70 +240,87 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
     @Override
     public Collection<OpcTagInfo> fetchMetadata(String... tagIds) {
-        Set<String> filter = Arrays.stream(tagIds).collect(Collectors.toSet());
-        return browseTags().stream().filter(tag -> filter.contains(tag.getId())).collect(Collectors.toList());
+        return Arrays.stream(tagIds).map(s -> {
+            OpcTagInfo ret;
+            try {
+                Map<Integer, PropertyDescription> properties = opcItemProperties.queryAvailableProperties(s)
+                        .stream().collect(Collectors.toMap(PropertyDescription::getId, Function.identity()));
+
+                ret = new OpcTagInfo(s).withName(nameFromId(s));
+
+                KeyedResultSet<Integer, JIVariant> rawProps = opcItemProperties.getItemProperties(s,
+                        properties.keySet().stream().mapToInt(Integer::intValue).toArray());
+                Map<Integer, OpcTagProperty> tagProps = new HashMap<>();
+                for (KeyedResult<Integer, JIVariant> result : rawProps) {
+                    tagProps.put(result.getKey(), new OpcTagProperty<>(result.getKey().toString(),
+                            toggleNullTermination(properties.get(result.getKey()).getDescription()),
+                            JIVariantMarshaller.toJavaType(result.getValue())));
+                }
+                ret.setProperties(new HashSet<>(tagProps.values()));
+                //set common properties
+                if (tagProps.containsKey(OpcDaItemProperties.MANDATORY_DATA_TYPE)) {
+                    OpcTagProperty<Short> tmp = tagProps.get(OpcDaItemProperties.MANDATORY_DATA_TYPE);
+                    ret.setType(JIVariantMarshaller.findJavaClass(tmp != null && tmp.getValue() != null ? tmp.getValue() : JIVariant.VT_EMPTY));
+                }
+
+                ret.setScanRate(Optional.ofNullable(extractFromProperty(
+                        (OpcTagProperty<Float>) tagProps.get(OpcDaItemProperties.MANDATORY_SERVER_SCAN_RATE),
+                        (rate -> Duration.ofMillis(Math.round(rate))))));
+                ret.setDescription(Optional.ofNullable((extractFromProperty(
+                        (OpcTagProperty<String>) tagProps.get(OpcDaItemProperties.RECOMMENDED_ITEM_DESCRIPTION),
+                        Function.identity()))));
+                //access rights part
+                Integer accessRightsBits = extractFromProperty(
+                        (OpcTagProperty<Integer>) tagProps.get(OpcDaItemProperties.MANDATORY_ITEM_ACCESS_RIGHTS),
+                        Function.identity());
+                if (accessRightsBits != null) {
+                    ret.withWriteAccessRights((accessRightsBits & OpcDaItemProperties.OPC_ACCESS_RIGHTS_WRITABLE) != 0);
+                    ret.withReadAccessRights((accessRightsBits & OpcDaItemProperties.OPC_ACCESS_RIGHTS_READABLE) != 0);
+
+                }
+
+            } catch (JIException e) {
+                throw new OpcException("Unable to fetch metadata for tag " + s, e);
+            }
+
+            return ret;
+        }).collect(Collectors.toList());
     }
 
     @Override
+    public Collection<OpcObjectInfo> fetchNextTreeLevel(String rootTagId) {
+        synchronized (opcServer) {
+            try {
+                opcServer.getBrowser().changePosition(rootTagId, OPCBROWSEDIRECTION.OPC_BROWSE_TO);
+                return opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_LEAF, "", 0, JIVariant.VT_EMPTY).asCollection().stream()
+                        .map(s -> new OpcObjectInfo(rootTagId + "." + s).withName(s))
+                        .collect(Collectors.toList());
+            } catch (Exception e) {
+                throw new OpcException("Unable to hierarchically browse the access space", e);
+            }
+
+        }
+    }
+
+
+    @Override
     public Collection<OpcTagInfo> browseTags() {
+
         if (getConnectionState() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to browse tags. Not connected!");
         }
-        try {
-            EnumString res = opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_FLAT, "", 0, JIVariant.VT_EMPTY);
-            if (res != null) {
-                return res.asCollection().stream()
-                        .map(s -> {
-                            OpcTagInfo ret;
-                            try {
-                                Map<Integer, PropertyDescription> properties = opcItemProperties.queryAvailableProperties(s)
-                                        .stream().collect(Collectors.toMap(PropertyDescription::getId, Function.identity()));
+        synchronized (opcServer) {
+            try {
+                opcServer.getBrowser().changePosition(null, OPCBROWSEDIRECTION.OPC_BROWSE_TO);
+                EnumString res = opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_FLAT, "", 0, JIVariant.VT_EMPTY);
+                if (res != null) {
+                    Collection<String> result = res.asCollection();
+                    return fetchMetadata(result.toArray(new String[result.size()]));
 
-                                ret = new OpcTagInfo(s)
-                                        .withName(nameFromId(s))
-                                        .withGroup(groupFromId(s));
-
-                                KeyedResultSet<Integer, JIVariant> rawProps = opcItemProperties.getItemProperties(s,
-                                        properties.keySet().stream().mapToInt(Integer::intValue).toArray());
-                                Map<Integer, OpcTagProperty> tagProps = new HashMap<>();
-                                for (KeyedResult<Integer, JIVariant> result : rawProps) {
-                                    tagProps.put(result.getKey(), new OpcTagProperty<>(result.getKey().toString(),
-                                            toggleNullTermination(properties.get(result.getKey()).getDescription()),
-                                            JIVariantMarshaller.toJavaType(result.getValue())));
-                                }
-                                ret.setProperties(new HashSet<>(tagProps.values()));
-                                //set common properties
-                                if (tagProps.containsKey(OpcDaItemProperties.MANDATORY_DATA_TYPE)) {
-                                    OpcTagProperty<Short> tmp = tagProps.get(OpcDaItemProperties.MANDATORY_DATA_TYPE);
-                                    ret.setType(JIVariantMarshaller.findJavaClass(tmp != null && tmp.getValue() != null ? tmp.getValue() : JIVariant.VT_EMPTY));
-                                }
-
-                                ret.setScanRate(Optional.ofNullable(extractFromProperty(
-                                        (OpcTagProperty<Float>) tagProps.get(OpcDaItemProperties.MANDATORY_SERVER_SCAN_RATE),
-                                        (rate -> Duration.ofMillis(Math.round(rate))))));
-                                ret.setDescription(Optional.ofNullable((extractFromProperty(
-                                        (OpcTagProperty<String>) tagProps.get(OpcDaItemProperties.RECOMMENDED_ITEM_DESCRIPTION),
-                                        Function.identity()))));
-                                //access rights part
-                                Integer accessRightsBits = extractFromProperty(
-                                        (OpcTagProperty<Integer>) tagProps.get(OpcDaItemProperties.MANDATORY_ITEM_ACCESS_RIGHTS),
-                                        Function.identity());
-                                if (accessRightsBits != null) {
-                                    ret.withWriteAccessRights((accessRightsBits & OpcDaItemProperties.OPC_ACCESS_RIGHTS_WRITABLE) != 0);
-                                    ret.withReadAccessRights((accessRightsBits & OpcDaItemProperties.OPC_ACCESS_RIGHTS_READABLE) != 0);
-
-                                }
-
-                            } catch (JIException e) {
-                                throw new OpcException("Unable to fetch metadata for tag " + s, e);
-                            }
-                            return ret;
-
-                        }).collect(Collectors.toList());
-
+                }
+            } catch (Exception e) {
+                throw new OpcException("Unable to browse tags", e);
             }
-        } catch (Exception e) {
-            throw new OpcException("Unable to browse tags", e);
         }
 
         return Collections.emptyList();
