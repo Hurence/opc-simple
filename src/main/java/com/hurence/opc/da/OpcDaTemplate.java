@@ -232,6 +232,13 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         return orig;
     }
 
+    private String sanitize(String orig) {
+        if (orig.endsWith(Character.toString((char) 165))) {
+            return orig.substring(0, orig.length() - 1);
+        }
+        return orig;
+    }
+
     private <S, T> T extractFromProperty(OpcTagProperty<S> property, Function<S, T> transformer) {
         if (property != null) {
             return transformer.apply(property.getValue());
@@ -241,6 +248,9 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
     @Override
     public Collection<OpcTagInfo> fetchMetadata(String... tagIds) {
+        if (getConnectionState() != ConnectionState.CONNECTED) {
+            throw new OpcException("Unable to fetch metadata. Not connected!");
+        }
         return Arrays.stream(tagIds).map(s -> {
             OpcTagInfo ret;
             try {
@@ -288,14 +298,29 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         }).collect(Collectors.toList());
     }
 
+
+    private String resolveItemId(String name) {
+        try {
+            return toggleNullTermination(sanitize(opcServer.getBrowser().getItemID(name)));
+        } catch (JIException e) {
+            throw new OpcException("Unable to resolve ID for item name " + name, e);
+        }
+    }
+
     @Override
     public Collection<OpcObjectInfo> fetchNextTreeLevel(String rootTagId) {
+        if (getConnectionState() != ConnectionState.CONNECTED) {
+            throw new OpcException("Unable to fetch tags. Not connected!");
+        }
         synchronized (opcServer) {
             try {
                 opcServer.getBrowser().changePosition(rootTagId, OPCBROWSEDIRECTION.OPC_BROWSE_TO);
-                return Stream.concat(opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_BRANCH, "", 0, JIVariant.VT_EMPTY).asCollection().stream(),
-                        opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_LEAF, "", 0, JIVariant.VT_EMPTY).asCollection().stream())
-                        .map(s -> new OpcObjectInfo(("".equals(rootTagId) ? rootTagId : (rootTagId + ".")) + s).withName(s))
+
+                return Stream.concat(
+                        opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_BRANCH, "", 0, JIVariant.VT_EMPTY).asCollection().stream()
+                                .map(s -> new OpcContainerInfo((resolveItemId(s))).withName(s)),
+                        opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_LEAF, "", 0, JIVariant.VT_EMPTY).asCollection().stream()
+                                .map(s -> new OpcTagInfo(resolveItemId(s)).withName(s)))
                         .collect(Collectors.toList());
             } catch (Exception e) {
                 throw new OpcException("Unable to hierarchically browse the access space", e);

@@ -25,7 +25,7 @@ import java.util.Optional;
  *
  * @author amarziali
  */
-public class OpcObjectInfo<T extends OpcObjectInfo<T>> {
+public abstract class OpcObjectInfo<T extends OpcObjectInfo<T>> {
 
     /**
      * Construct a new instance.

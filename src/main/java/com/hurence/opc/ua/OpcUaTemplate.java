@@ -440,8 +440,9 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
                     .filter(referenceDescription -> referenceDescription.getNodeId().local().isPresent())
                     .filter(referenceDescription -> !referenceDescription.getTypeDefinition().isLocal() ||
                             !referenceDescription.getTypeDefinition().local().get().equals(Identifiers.PropertyType))
-                    .map(referenceDescription -> new OpcObjectInfo(referenceDescription.getNodeId().local().get().toParseableString())
-
+                    .map(referenceDescription -> (NodeClass.Object.equals(referenceDescription.getNodeClass()) ?
+                            new OpcContainerInfo(referenceDescription.getNodeId().local().get().toParseableString()) :
+                            new OpcTagInfo(referenceDescription.getNodeId().local().get().toParseableString()))
                             .withDescription(referenceDescription.getDisplayName().getText())
                             .withName(referenceDescription.getBrowseName().getName()))
                     .collect(Collectors.toList());
