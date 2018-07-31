@@ -41,6 +41,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 
 /**
@@ -292,8 +293,9 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         synchronized (opcServer) {
             try {
                 opcServer.getBrowser().changePosition(rootTagId, OPCBROWSEDIRECTION.OPC_BROWSE_TO);
-                return opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_LEAF, "", 0, JIVariant.VT_EMPTY).asCollection().stream()
-                        .map(s -> new OpcObjectInfo(rootTagId + "." + s).withName(s))
+                return Stream.concat(opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_BRANCH, "", 0, JIVariant.VT_EMPTY).asCollection().stream(),
+                        opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_LEAF, "", 0, JIVariant.VT_EMPTY).asCollection().stream())
+                        .map(s -> new OpcObjectInfo(("".equals(rootTagId) ? rootTagId : (rootTagId + ".")) + s).withName(s))
                         .collect(Collectors.toList());
             } catch (Exception e) {
                 throw new OpcException("Unable to hierarchically browse the access space", e);
