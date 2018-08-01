@@ -53,6 +53,7 @@ import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.ServerState;
 import org.eclipse.milo.opcua.stack.core.types.structured.BrowseDescription;
 import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
+import org.eclipse.milo.opcua.stack.core.types.structured.ReferenceDescription;
 import org.eclipse.milo.opcua.stack.core.util.CertificateUtil;
 import org.eclipse.milo.opcua.stack.core.util.CryptoRestrictions;
 import org.slf4j.Logger;
@@ -66,6 +67,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -432,12 +434,16 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
     @Override
     public Collection<OpcObjectInfo> fetchNextTreeLevel(String rootTagId) {
         try {
-            return Arrays.stream(client.browse(new BrowseDescription(NodeId.parse(rootTagId), BrowseDirection.Forward,
-
-                    Identifiers.HierarchicalReferences, true,
-                    UInteger.valueOf(NodeClass.Object.getValue() | NodeClass.Variable.getValue()),
-                    UInteger.valueOf(BrowseResultMask.All.getValue()))).get().getReferences())
+            Map<NodeId, ReferenceDescription> results = Arrays.stream(
+                    client.browse(new BrowseDescription(NodeId.parse(rootTagId), BrowseDirection.Forward,
+                            Identifiers.HierarchicalReferences, true,
+                            UInteger.valueOf(NodeClass.Object.getValue() | NodeClass.Variable.getValue()),
+                            UInteger.valueOf(BrowseResultMask.All.getValue()))).get().getReferences())
                     .filter(referenceDescription -> referenceDescription.getNodeId().local().isPresent())
+                    .collect(Collectors.toMap(referenceDescription -> referenceDescription.getNodeId().local().get(),
+                            Function.identity(), (k1, k2) -> k1));
+
+            return results.values().stream()
                     .filter(referenceDescription -> !referenceDescription.getTypeDefinition().isLocal() ||
                             !referenceDescription.getTypeDefinition().local().get().equals(Identifiers.PropertyType))
                     .map(referenceDescription -> (NodeClass.Object.equals(referenceDescription.getNodeClass()) ?
