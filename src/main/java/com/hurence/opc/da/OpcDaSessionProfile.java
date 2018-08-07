@@ -20,6 +20,10 @@ package com.hurence.opc.da;
 import com.hurence.opc.SessionProfile;
 
 import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * {@link SessionProfile} with OPC-DA customizations.
@@ -42,6 +46,47 @@ public class OpcDaSessionProfile extends SessionProfile<OpcDaSessionProfile> {
      */
     private Duration refreshInterval = Duration.ofSeconds(1);
 
+    /**
+     * The client can negotiate with the server which data type should be used for a tag.
+     */
+    private Map<String, Short> dataTypeOverrideMap = new HashMap<>();
+
+    /**
+     * Forces a datatype for a tag.
+     *
+     * @param tagId    the tag id.
+     * @param dataType the data type code (See {@link org.jinterop.dcom.core.JIVariant}
+     * @return itself
+     */
+    public OpcDaSessionProfile withDataTypeForTag(String tagId, short dataType) {
+        dataTypeOverrideMap.put(tagId, dataType);
+        return this;
+    }
+
+    /**
+     * Get the data type for a certain tag.
+     *
+     * @param tagId the tag id
+     * @return the forced data type if set. Otherwise an empty {@link Optional}
+     */
+    public Optional<Short> dataTypeForTag(String tagId) {
+        return Optional.ofNullable(dataTypeOverrideMap.get(tagId));
+    }
+
+    /**
+     * Get the whole data override mapping.
+     *
+     * @return an unmodifiable map.
+     */
+    public Map<String, Short> getDataTypeOverrideMap() {
+        return Collections.unmodifiableMap(dataTypeOverrideMap);
+    }
+
+    /**
+     * Gets the refresh interval.
+     *
+     * @return a never null {@link Duration}
+     */
     public final Duration getRefreshInterval() {
         return refreshInterval;
     }
@@ -87,6 +132,7 @@ public class OpcDaSessionProfile extends SessionProfile<OpcDaSessionProfile> {
         return "OpcDaSessionProfile{" +
                 "directRead=" + directRead +
                 ", refreshInterval=" + refreshInterval +
+                ", dataTypeOverrideMap=" + dataTypeOverrideMap +
                 "} " + super.toString();
     }
 }

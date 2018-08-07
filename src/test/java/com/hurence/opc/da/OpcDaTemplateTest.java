@@ -21,6 +21,7 @@ import com.hurence.opc.*;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.exception.OpcException;
 import com.hurence.opc.util.AutoReconnectOpcOperations;
+import org.jinterop.dcom.core.JIVariant;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,7 +88,7 @@ public class OpcDaTemplateTest {
 
     @Test
     public void testFetchMetadata() {
-        opcDaOperations.fetchMetadata("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+        opcDaOperations.fetchMetadata("Random.Coucou")
                 .forEach(System.out::println);
     }
 
@@ -231,6 +232,22 @@ public class OpcDaTemplateTest {
         } finally {
             opcDaOperations.releaseSession(session);
         }
+    }
+
+    @Test
+    public void forceDataTypeTest() throws Exception {
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshInterval(Duration.ofSeconds(1))
+                .withDataTypeForTag("Bucket Brigade.Int4", (short) JIVariant.VT_R8);
+
+        try (OpcDaSession session = opcDaOperations.createSession(sessionProfile)) {
+            OpcData data = session.read("Bucket Brigade.Int4").get(0);
+            System.out.println(data);
+            Assert.assertNotNull(data);
+            Assert.assertTrue(data.getValue() instanceof Double);
+        }
+
     }
 
 

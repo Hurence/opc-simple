@@ -62,16 +62,17 @@ public class OpcDaSession implements OpcSession {
     private OPCItemMgt opcItemMgt;
     private OPCDATASOURCE datasource;
     private final WeakReference<OpcDaTemplate> creatingOperations;
-    private final long refreshRateMillis;
+    private final Map<String, Short> dataTypeMap;
 
-    private OpcDaSession(OpcDaTemplate creatingOperations, OPCGroupStateMgt group, OPCDATASOURCE datasource)
+    private OpcDaSession(OpcDaTemplate creatingOperations, OPCGroupStateMgt group, OPCDATASOURCE datasource,
+                         Map<String, Short> dataTypeMap)
             throws JIException {
         this.group = group;
         this.opcItemMgt = group.getItemManagement();
         this.syncIO = group.getSyncIO();
         this.datasource = datasource;
         this.creatingOperations = new WeakReference<>(creatingOperations);
-        this.refreshRateMillis = group.getState().getUpdateRate();
+        this.dataTypeMap = dataTypeMap;
     }
 
     static OpcDaSession create(OPCServer server, OpcDaSessionProfile sessionProfile, OpcDaTemplate creatingOperations) {
@@ -80,7 +81,8 @@ public class OpcDaSession implements OpcSession {
                     server.addGroup(null, true,
                             (int) sessionProfile.getRefreshInterval().toMillis(), clientHandleCounter.incrementAndGet(),
                             null, null, 0),
-                    sessionProfile.isDirectRead() ? OPCDATASOURCE.OPC_DS_DEVICE : OPCDATASOURCE.OPC_DS_CACHE);
+                    sessionProfile.isDirectRead() ? OPCDATASOURCE.OPC_DS_DEVICE : OPCDATASOURCE.OPC_DS_CACHE,
+                    sessionProfile.getDataTypeOverrideMap());
         } catch (Exception e) {
             throw new OpcException("Unable to create an OPC-DA session", e);
         }
@@ -240,6 +242,7 @@ public class OpcDaSession implements OpcSession {
             opcitemdef.setActive(true);
             opcitemdef.setClientHandle(clientHandleCounter.incrementAndGet());
             opcitemdef.setItemID(tag);
+            opcitemdef.setRequestedDataType(dataTypeMap.getOrDefault(tag, (short) JIVariant.VT_EMPTY));
             try {
                 Integer serverHandle = opcItemMgt.add(opcitemdef).get(0).getValue().getServerHandle();
                 if (serverHandle == null || serverHandle == 0) {
