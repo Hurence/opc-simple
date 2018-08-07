@@ -125,11 +125,8 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
                     " is not supported by OPC-DA connector");
         }
 
-        String username = null;
-        String password = null;
-
-        username = ((UsernamePasswordCredentials) credentials).getUser();
-        password = ((UsernamePasswordCredentials) credentials).getPassword();
+        String username = ((UsernamePasswordCredentials) credentials).getUser();
+        String password = ((UsernamePasswordCredentials) credentials).getPassword();
 
 
         ConnectionState cs = getConnectionState();
@@ -162,9 +159,10 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
 
             opcServer = new OPCServer(comServer.createInstance());
+
             opcItemProperties = opcServer.getItemPropertiesService();
             scheduler = executorServiceFactory.createScheduler();
-            scheduler.scheduleWithFixedDelay(this::checkAlive, 0, 1, TimeUnit.SECONDS);
+            scheduler.scheduleWithFixedDelay(this::checkAlive, 0, connectionProfile.getKeepAliveInterval().toNanos(), TimeUnit.NANOSECONDS);
         } catch (Exception e) {
             try {
                 disconnect();
@@ -176,22 +174,25 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     }
 
     @Override
-    public void disconnect() {
+    public synchronized void disconnect() {
         try {
             getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
-            cleanup();
+            if (scheduler != null) {
+                scheduler.shutdown();
+            }
+            destroySessions();
+
         } catch (Exception e) {
             throw new OpcException("Unable to properly disconnect", e);
         } finally {
+            cleanup();
             getStateAndSet(Optional.of(ConnectionState.DISCONNECTED));
         }
     }
 
-    private void cleanup() {
-        logger.info("Destroying DCOM session");
-        if (scheduler != null) {
-            scheduler.shutdown();
-        }
+
+    private void destroySessions() {
+        logger.info("Destroying DCOM sessions");
         while (!sessions.isEmpty()) {
             try {
                 OpcDaSession s = sessions.stream().findFirst().get();
@@ -203,17 +204,18 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         }
         try {
             JISession.destroySession(session);
-            logger.info("Session properly cleaned up");
 
-        } catch (JIException e) {
+        } catch (Exception e) {
             throw new OpcException("Unable to properly destroy dcom session", e);
-        } finally {
-            opcItemProperties = null;
-            comServer = null;
-            session = null;
-            opcServer = null;
-            scheduler = null;
         }
+    }
+
+    private void cleanup() {
+        opcItemProperties = null;
+        comServer = null;
+        session = null;
+        opcServer = null;
+        scheduler = null;
     }
 
 
@@ -325,14 +327,12 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
             } catch (Exception e) {
                 throw new OpcException("Unable to hierarchically browse the access space", e);
             }
-
         }
     }
 
 
     @Override
     public Collection<OpcTagInfo> browseTags() {
-
         if (getConnectionState() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to browse tags. Not connected!");
         }
@@ -349,7 +349,6 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
                 throw new OpcException("Unable to browse tags", e);
             }
         }
-
         return Collections.emptyList();
     }
 
@@ -358,8 +357,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         if (getConnectionState() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to create a session. Not connected!");
         }
-        OpcDaSession ret = OpcDaSession.create(opcServer, sessionProfile.getRefreshPeriod().toMillis(),
-                sessionProfile.isDirectRead(), this);
+        OpcDaSession ret = OpcDaSession.create(opcServer, sessionProfile, this);
         sessions.add(ret);
         return ret;
 

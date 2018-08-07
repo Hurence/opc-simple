@@ -17,10 +17,7 @@
 
 package com.hurence.opc.da;
 
-import com.hurence.opc.OpcData;
-import com.hurence.opc.OpcOperations;
-import com.hurence.opc.OpcSession;
-import com.hurence.opc.OperationStatus;
+import com.hurence.opc.*;
 import com.hurence.opc.exception.OpcException;
 import org.jinterop.dcom.common.JIException;
 import org.jinterop.dcom.core.JIVariant;
@@ -39,7 +36,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.ref.WeakReference;
+import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -58,29 +58,29 @@ public class OpcDaSession implements OpcSession {
     private OPCGroupStateMgt group;
     private Map<String, Map.Entry<Integer, Integer>> handlesMap = new HashMap<>();
     private static final AtomicInteger clientHandleCounter = new AtomicInteger();
-    private final long refreshPeriodMillis;
     private OPCSyncIO syncIO;
     private OPCItemMgt opcItemMgt;
     private OPCDATASOURCE datasource;
     private final WeakReference<OpcDaTemplate> creatingOperations;
+    private final long refreshRateMillis;
 
-    private OpcDaSession(OpcDaTemplate creatingOperations, OPCGroupStateMgt group, OPCDATASOURCE datasource,
-                         long refreshPeriodMillis) throws JIException {
+    private OpcDaSession(OpcDaTemplate creatingOperations, OPCGroupStateMgt group, OPCDATASOURCE datasource)
+            throws JIException {
         this.group = group;
         this.opcItemMgt = group.getItemManagement();
         this.syncIO = group.getSyncIO();
         this.datasource = datasource;
-        this.refreshPeriodMillis = refreshPeriodMillis;
         this.creatingOperations = new WeakReference<>(creatingOperations);
+        this.refreshRateMillis = group.getState().getUpdateRate();
     }
 
-    static OpcDaSession create(OPCServer server, long refreshPeriodMillis, boolean directRead, OpcDaTemplate creatingOperations) {
+    static OpcDaSession create(OPCServer server, OpcDaSessionProfile sessionProfile, OpcDaTemplate creatingOperations) {
         try {
             return new OpcDaSession(creatingOperations,
                     server.addGroup(null, true,
-                            (int) refreshPeriodMillis, clientHandleCounter.incrementAndGet(), null, null, 0),
-                    directRead ? OPCDATASOURCE.OPC_DS_DEVICE : OPCDATASOURCE.OPC_DS_CACHE,
-                    refreshPeriodMillis);
+                            (int) sessionProfile.getRefreshInterval().toMillis(), clientHandleCounter.incrementAndGet(),
+                            null, null, 0),
+                    sessionProfile.isDirectRead() ? OPCDATASOURCE.OPC_DS_DEVICE : OPCDATASOURCE.OPC_DS_CACHE);
         } catch (Exception e) {
             throw new OpcException("Unable to create an OPC-DA session", e);
         }
@@ -155,33 +155,75 @@ public class OpcDaSession implements OpcSession {
         } catch (Exception e) {
             throw new OpcException("Unable to write data", e);
         }
-
     }
 
+
     @Override
-    public Stream<OpcData> stream(String... tags) {
+    public Stream<OpcData> stream(SubscriptionConfiguration subscriptionConfiguration, String... tags) {
+        if (group == null) {
+            throw new OpcException("Unable to read tags. Session has been detached!");
+        }
+        long refreshRate;
+        try {
+            refreshRate = group.getState().getUpdateRate();
+        } catch (JIException e) {
+            throw new OpcException("Unable to get revised refresh interval", e);
+        }
+        final ScheduledExecutorService readScheduler = Executors.newSingleThreadScheduledExecutor();
+        final ScheduledExecutorService writeScheduler = Executors.newSingleThreadScheduledExecutor();
+        final AtomicBoolean inError = new AtomicBoolean();
+        final TransferQueue<OpcData> transferQueue = new LinkedTransferQueue<>();
+        final Map<String, OpcData> latestReads = Collections.synchronizedMap(new HashMap<>());
+        final Map<String, OpcData> latestWrites = Collections.synchronizedMap(new HashMap<>());
 
-        final ArrayList<OpcData> readItems = new ArrayList<>();
-        final long lastTimeStamp[] = {0L};
-        return Stream.generate(() -> {
-            if (readItems.isEmpty()) {
-                try {
-
-                    long toSleep = refreshPeriodMillis - (System.currentTimeMillis() - lastTimeStamp[0]);
-                    if (toSleep > 0) {
-                        Thread.sleep(toSleep);
-                    }
-                    readItems.addAll(read(tags));
-                    lastTimeStamp[0] = System.currentTimeMillis();
-
-                } catch (InterruptedException ie) {
-                    throw new OpcException("Stream interrupted", ie);
-                } catch (Exception e) {
-                    throw new OpcException("EOF reading tags. Disconnected", e);
-                }
+        //set up opc task to read at refresh rate
+        readScheduler.scheduleWithFixedDelay(() -> {
+            try {
+                read(tags).forEach(opcData -> latestReads.compute(opcData.getTag(),
+                        (k, oldValue) -> oldValue == null || oldValue.getTimestamp().isBefore(opcData.getTimestamp()) ? opcData : oldValue));
+            } catch (Exception e) {
+                inError.set(true);
+                throw new OpcException("Error while reading tags. Stream aborted", e);
             }
-            return readItems.size() > 0 ? readItems.remove(0) : null;
-        });
+        }, 0L, refreshRate, TimeUnit.MILLISECONDS);
+
+        //now group by streaming configuration and schedule the tag value transfer
+        Map<Duration, List<String>> streamConfigurationByTags = Arrays.stream(tags)
+                .collect(Collectors.groupingBy(subscriptionConfiguration::samplingIntervalForTag));
+        streamConfigurationByTags.forEach((period, tagList) ->
+                writeScheduler.scheduleAtFixedRate(() -> tagList.forEach(tag -> {
+                    try {
+                        OpcData lastWrite = latestWrites.get(tag);
+                        OpcData lastRead = latestReads.get(tag);
+                        if (lastRead != null) {
+                            if (!lastRead.equals(lastWrite)) {
+                                latestWrites.put(tag, lastRead);
+                                transferQueue.add(lastRead);
+                            }
+                        }
+                    } catch (Exception e) {
+                        inError.set(true);
+                        throw new OpcException("Unable to buffer data", e);
+                    }
+
+                }), 0L, period.toNanos(), TimeUnit.NANOSECONDS));
+        final long minPollingTime = streamConfigurationByTags.keySet().stream()
+                .mapToLong(Duration::toNanos).min().getAsLong();
+        return Stream.generate(() -> {
+            if (inError.get()) {
+                throw new OpcException("EOF reading from the steam.");
+            }
+            try {
+                return transferQueue.poll(minPollingTime, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException ie) {
+                throw new OpcException("Interrupted reading from the steam.", ie);
+
+            }
+        }).filter(opcData -> opcData != null)
+                .onClose(() -> {
+                    readScheduler.shutdown();
+                    writeScheduler.shutdown();
+                });
     }
 
 
@@ -200,6 +242,9 @@ public class OpcDaSession implements OpcSession {
             opcitemdef.setItemID(tag);
             try {
                 Integer serverHandle = opcItemMgt.add(opcitemdef).get(0).getValue().getServerHandle();
+                if (serverHandle == null || serverHandle == 0) {
+                    throw new OpcException("Received invalid handle from OPC server.");
+                }
                 handles = new AbstractMap.SimpleEntry<>(serverHandle, opcitemdef.getClientHandle());
             } catch (Exception e) {
                 throw new OpcException("Unable to add item " + tag, e);

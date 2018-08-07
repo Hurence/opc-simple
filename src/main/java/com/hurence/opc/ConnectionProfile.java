@@ -30,13 +30,20 @@ import java.time.Duration;
 public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
 
 
+    /**
+     * The connection {@link URI}
+     */
     private URI connectionUri;
-
 
     /**
      * The timeout used to read/write.
      */
     private Duration socketTimeout;
+
+    /**
+     * The interval used to ping the remote server and check for health. (defaults to 10 seconds)
+     */
+    private Duration keepAliveInterval = Duration.ofSeconds(10);
 
     /**
      * The authentication credentials.
@@ -47,9 +54,9 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
 
 
     /**
-     * Set the host and return itself.
+     * Set the connection URI and return itself.
      *
-     * @param connectionUri the host.
+     * @param connectionUri the URI.
      * @return itself.
      */
     public final T withConnectionUri(URI connectionUri) {
@@ -66,6 +73,17 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
      */
     public final T withSocketTimeout(Duration socketTimeout) {
         setSocketTimeout(socketTimeout);
+        return (T) this;
+    }
+
+    /**
+     * Set the interval used to ping the remote server and check for health.
+     *
+     * @param keepAliveInterval a valid non null {@link Duration}
+     * @return itself
+     */
+    public final T withKeepAliveInterval(Duration keepAliveInterval) {
+        setKeepAliveInterval(keepAliveInterval);
         return (T) this;
     }
 
@@ -100,10 +118,41 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
         this.socketTimeout = socketTimeout;
     }
 
+    /**
+     * Get The interval used to ping the remote server and check for health.
+     *
+     * @return a {@link Duration}
+     */
+    public Duration getKeepAliveInterval() {
+        return keepAliveInterval;
+    }
+
+    /**
+     * Set the interval used to ping the remote server and check for health. (defaults to 10 seconds)
+     *
+     * @param keepAliveInterval a never null {@link Duration}
+     */
+    public void setKeepAliveInterval(Duration keepAliveInterval) {
+        if (keepAliveInterval == null) {
+            throw new IllegalArgumentException("keepAliveInterval must be a valid non null duration");
+        }
+        this.keepAliveInterval = keepAliveInterval;
+    }
+
+    /**
+     * Gets the connection URI.
+     *
+     * @return a valid {@link URI}
+     */
     public URI getConnectionUri() {
         return connectionUri;
     }
 
+    /**
+     * Sets the connection URI
+     *
+     * @param connectionUri a valid {@link URI} (the scheme will depend to the underlying implementation.
+     */
     public void setConnectionUri(URI connectionUri) {
         this.connectionUri = connectionUri;
     }
@@ -131,8 +180,10 @@ public abstract class ConnectionProfile<T extends ConnectionProfile<T>> {
     @Override
     public String toString() {
         return "ConnectionProfile{" +
-                "connectionUri='" + connectionUri + '\'' +
+                "connectionUri=" + connectionUri +
                 ", socketTimeout=" + socketTimeout +
+                ", keepAliveInterval=" + keepAliveInterval +
+                ", credentials=" + credentials +
                 '}';
     }
 }

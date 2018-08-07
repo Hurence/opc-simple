@@ -17,11 +17,9 @@
 
 package com.hurence.opc.da;
 
-import com.hurence.opc.OpcData;
-import com.hurence.opc.OpcSession;
-import com.hurence.opc.OpcTagInfo;
-import com.hurence.opc.OperationStatus;
+import com.hurence.opc.*;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
+import com.hurence.opc.exception.OpcException;
 import com.hurence.opc.util.AutoReconnectOpcOperations;
 import org.junit.*;
 import org.slf4j.Logger;
@@ -31,8 +29,8 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.Arrays;
-import java.util.Collection;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * E2E test. You can run by spawning an OPC-DA test server and changing connection parameters to target it.
@@ -60,6 +58,7 @@ public class OpcDaTemplateTest {
                         .withUser("OPC")
                         .withPassword("opc"))
                 .withConnectionUri(new URI("opc.da://192.168.99.100:135"))
+                .withKeepAliveInterval(Duration.ofSeconds(5))
                 .withSocketTimeout(Duration.of(1, ChronoUnit.SECONDS));
 
         opcDaOperations.connect(connectionProfile);
@@ -92,25 +91,89 @@ public class OpcDaTemplateTest {
                 .forEach(System.out::println);
     }
 
+
     @Test
-    public void listenToTags() throws Exception {
+    public void testSampling() throws Exception {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriod(Duration.ofMillis(300));
+                .withRefreshInterval(Duration.ofMillis(300));
 
         try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
-            session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
-                    .limit(20)
-                    .forEach(System.out::println);
+            List<Instant> received = session.stream(
+                    new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10))
+                            .withTagSamplingIntervalForTag("Square Waves.Real8", Duration.ofSeconds(1)),
+                    "Square Waves.Real8")
+                    .limit(5)
+                    .map(a -> {
+                        Instant now = Instant.now();
+                        System.out.println(a);
+                        return now;
+                    }).collect(Collectors.toList());
+
+            for (int i = 1; i < received.size(); i++) {
+                Assert.assertTrue(received.get(i).toEpochMilli() - received.get(i - 1).toEpochMilli() >= 900);
+            }
 
         }
     }
 
     @Test
+    public void testStaticValues() throws Exception {
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshInterval(Duration.ofMillis(300));
+
+
+        try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
+            new Thread(() -> {
+                try {
+                    Thread.sleep(5000);
+                    session.write(new OpcData("Bucket Brigade.Real8", Instant.now(), new Random().nextDouble()));
+
+                } catch (Exception e) {
+                    Assert.fail(e.getMessage());
+                }
+            }).start();
+
+            List<OpcData> received = session.stream(
+                    new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
+                    "Bucket Brigade.Real8")
+                    .limit(2)
+                    .map(a -> {
+                        System.out.println(a);
+                        return a;
+                    }).collect(Collectors.toList());
+
+            Assert.assertEquals(2, received.size());
+            Assert.assertFalse(Objects.equals(received.get(0).getValue(), received.get(1).getValue()));
+
+        }
+    }
+
+    @Test
+    public void listenToTags() throws Exception {
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshInterval(Duration.ofMillis(300));
+
+        try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
+            Assert.assertEquals(20, session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
+                    "Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+                    .limit(20)
+                    .map(a -> {
+                        System.out.println(a);
+                        return a;
+                    }).count());
+
+        }
+    }
+
+
+    @Test
     public void testReadError() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriod(Duration.ofMillis(300));
+                .withRefreshInterval(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
@@ -135,12 +198,13 @@ public class OpcDaTemplateTest {
     public void listenToArray() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriod(Duration.ofMillis(300));
+                .withRefreshInterval(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
             session = opcDaOperations.createSession(sessionProfile);
-            session.stream("Random.ArrayOfString")
+            session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(500)),
+                    "Random.ArrayOfString")
                     .limit(20)
                     .map(a -> Arrays.toString((String[]) a.getValue()))
                     .forEach(System.out::println);
@@ -154,16 +218,32 @@ public class OpcDaTemplateTest {
     public void listenToAll() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriod(Duration.ofMillis(300));
+                .withRefreshInterval(Duration.ofMillis(10));
+
         OpcDaSession session = null;
 
         try {
             session = opcDaOperations.createSession(sessionProfile);
-            session.stream(opcDaOperations.browseTags().stream().map(OpcTagInfo::getId).toArray(a -> new String[a]))
-                    .limit(100)
+            session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(100)),
+                    opcDaOperations.browseTags().stream().map(OpcTagInfo::getId).toArray(a -> new String[a]))
+                    .limit(10000)
                     .forEach(System.out::println);
         } finally {
             opcDaOperations.releaseSession(session);
+        }
+    }
+
+
+    @Test(expected = OpcException.class)
+    public void testTagNotFound() throws Exception {
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshInterval(Duration.ofMillis(300));
+
+        try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
+            session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(500)),
+                    "I do not exist")
+                    .forEach(System.out::println);
         }
     }
 
@@ -171,7 +251,7 @@ public class OpcDaTemplateTest {
     public void testWriteValues() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriod(Duration.ofMillis(300));
+                .withRefreshInterval(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {
@@ -192,7 +272,7 @@ public class OpcDaTemplateTest {
     public void testWriteValuesFails() {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshPeriod(Duration.ofMillis(300));
+                .withRefreshInterval(Duration.ofMillis(300));
         OpcDaSession session = null;
 
         try {

@@ -29,7 +29,7 @@ Add The maven dependency
 <dependency>
     <groupId>com.github.Hurence</groupId>
     <artifactId>opc-simple</artifactId>
-    <version>1.2.1</version>
+    <version>2.0.0</version>
 </dependency>
 
 ```
@@ -160,10 +160,9 @@ Session is the main entry point for the following actions:
 * Stream
 
 
-When creating a session you should specify the default item refresh rate. 
-Depending on the OPC standard you are using, you can specify other properties (e.g. direct read from hardware for OPC-DA).
+When creating a session you should specify some parameters depending on the OPC standard you are using (e.g. direct read from hardware for OPC-DA).
 
-Sessions should be created and released (beware leaks!) through the Connection obejct.
+Sessions should be created and released (beware leaks!) through the Connection object.
 
 > SessionProfile and OpcOperations interface extends AutoCloseable interface.
 > Hence you can use the handy *try-with-resources* syntax without taking care about destroying connection or sessions.
@@ -178,8 +177,8 @@ An example:
   OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
         // direct read from device
         .withDirectRead(false)
-        // publication period
-        .withRefreshPeriod(Duration.ofMillis(100));
+        // refresh period
+        .withRefreshInterval(Duration.ofMillis(100));
 
     try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
         //do something useful with your session
@@ -194,9 +193,7 @@ An example:
 
   OpcUaSessionProfile sessionProfile = new OpcUaSessionProfile()
         //the publication window
-        .withRefreshPeriod(Duration.ofMillis(100))
-        // the data polling interval
-        .withDefaultPollingInterval(Duration.ofMillis(10));
+        .withDefaultPublicationInterval(Duration.ofMillis(100));
 
         
     try (OpcSession session = opcUaOperations.createSession(sessionProfile)) {
@@ -213,7 +210,8 @@ and as soon as possible print their values to stdout.
     
     try {
         session = opcDaOperations.createSession(sessionProfile);
-        session.stream("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+        session.stream((new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(100)),
+                "Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
                 .forEach(System.out::println);
     } finally {
         opcDaOperations.releaseSession(session);

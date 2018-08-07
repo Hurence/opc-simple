@@ -20,6 +20,7 @@ package com.hurence.opc.ua;
 import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcSession;
 import com.hurence.opc.OperationStatus;
+import com.hurence.opc.SubscriptionConfiguration;
 import com.hurence.opc.exception.OpcException;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
 import org.eclipse.milo.opcua.sdk.client.api.subscriptions.UaMonitoredItem;
@@ -61,9 +62,7 @@ public class OpcUaSession implements OpcSession {
 
 
     private static final AtomicInteger clientHandleCounter = new AtomicInteger();
-    private final Duration refreshPeriod;
-    private final Duration defaultPollPeriod;
-    private final Map<String, Duration> pollingMap;
+    private final Duration publicationInterval;
     private final WeakReference<OpcUaClient> client;
     private final WeakReference<OpcUaTemplate> creatingOperations;
     private UaSubscription subscription;
@@ -71,14 +70,10 @@ public class OpcUaSession implements OpcSession {
 
     private OpcUaSession(OpcUaTemplate creatingOperations,
                          OpcUaClient client,
-                         Duration refreshPeriod,
-                         Duration defaultPollingInterval,
-                         Map<String, Duration> pollingMap) throws Exception {
-        this.refreshPeriod = refreshPeriod;
-        this.defaultPollPeriod = defaultPollingInterval;
-        this.pollingMap = pollingMap;
+                         Duration publicationInterval) {
         this.client = new WeakReference<>(client);
         this.creatingOperations = new WeakReference<>(creatingOperations);
+        this.publicationInterval = publicationInterval;
     }
 
 
@@ -86,11 +81,8 @@ public class OpcUaSession implements OpcSession {
                                OpcUaClient client,
                                OpcUaSessionProfile sessionProfile) {
         try {
-            return new OpcUaSession(creatingOperations, client,
-                    sessionProfile.getRefreshPeriod(),
-                    sessionProfile.getDefaultPollingInterval() != null ?
-                            sessionProfile.getDefaultPollingInterval() : sessionProfile.getRefreshPeriod(),
-                    sessionProfile.getPollingMap());
+            return new OpcUaSession(creatingOperations, client, sessionProfile.getDefaultPublicationInterval());
+
         } catch (Exception e) {
             throw new OpcException("Unable to create an OPC-UA session", e);
         }
@@ -99,7 +91,7 @@ public class OpcUaSession implements OpcSession {
     private synchronized UaSubscription subscription() {
         try {
             if (subscription == null && client.get() != null) {
-                subscription = client.get().getSubscriptionManager().createSubscription(Math.round(refreshPeriod.toNanos() / 1.0e6)).get();
+                subscription = client.get().getSubscriptionManager().createSubscription(Math.round(publicationInterval.toNanos() / 1.0e6)).get();
             }
         } catch (Exception e) {
             throw new OpcException("Unable to create subscription", e);
@@ -212,10 +204,9 @@ public class OpcUaSession implements OpcSession {
     }
 
     @Override
-    public Stream<OpcData> stream(String... tags) {
+    public Stream<OpcData> stream(SubscriptionConfiguration subscriptionConfiguration, String... tags) {
         BlockingQueue<OpcData> transferQueue = new SynchronousQueue<>();
         final List<UaMonitoredItem> results = new ArrayList<>();
-        final Duration defaultPollRate = defaultPollPeriod != null ? defaultPollPeriod : refreshPeriod;
         final Map<String, Integer> handles = Arrays.stream(tags).collect(Collectors.toMap(Function.identity(), tag -> clientHandleCounter.incrementAndGet()));
         final Map<Integer, String> reverseHandles = handles.entrySet().stream().collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey));
 
@@ -230,18 +221,17 @@ public class OpcUaSession implements OpcSession {
                 }
             };
             results.addAll(subscription().createMonitoredItems(TimestampsToReturn.Both,
-                    Arrays.stream(tags).map(tag -> {
-                        Duration tagPollRate = pollingMap.getOrDefault(tag, defaultPollRate);
-                        return new MonitoredItemCreateRequest(
-                                new ReadValueId(NodeId.parse(tag), AttributeId.Value.uid(), null, QualifiedName.NULL_VALUE),
-                                MonitoringMode.Reporting,
-                                new MonitoringParameters(UInteger.valueOf(handles.get(tag)),
-                                        tagPollRate.toNanos() / 1.0e6,
-                                        null,
-                                        UInteger.valueOf(Math.round(Math.ceil((double) refreshPeriod.toNanos() / (double) defaultPollRate.toNanos())))
-                                        , true)
-                        );
-                    }).collect(Collectors.toList()),
+                    Arrays.stream(tags).map(tag ->
+                            new MonitoredItemCreateRequest(
+                                    new ReadValueId(NodeId.parse(tag), AttributeId.Value.uid(), null, QualifiedName.NULL_VALUE),
+                                    MonitoringMode.Reporting,
+                                    new MonitoringParameters(UInteger.valueOf(handles.get(tag)),
+                                            (double) subscriptionConfiguration.samplingIntervalForTag(tag).toNanos() / 1.0e6,
+                                            null,
+                                            UInteger.valueOf(Math.round(Math.ceil((double) publicationInterval.toNanos() /
+                                                    (double) subscriptionConfiguration.samplingIntervalForTag(tag).toNanos())))
+                                            , true)
+                            )).collect(Collectors.toList()),
                     ((uaMonitoredItem, integer) -> {
                         logger.info("Subscription for item {} with revised polling time {}",
                                 reverseHandles.get(uaMonitoredItem.getClientHandle().intValue()),
@@ -254,7 +244,7 @@ public class OpcUaSession implements OpcSession {
                     .filter(uaMonitoredItem -> !uaMonitoredItem.getStatusCode().isGood())
                     .findFirst()
                     .ifPresent(uaMonitoredItem -> {
-                        throw new OpcException(String.format("Failure training to monitoring item %s : %s",
+                        throw new OpcException(String.format("Failure trying to monitoring item %s : %s",
                                 reverseHandles.get(uaMonitoredItem.getClientHandle().intValue()),
                                 Arrays.toString(StatusCodes.lookup(uaMonitoredItem.getStatusCode().getValue()).orElse(null))));
                     });
@@ -263,7 +253,7 @@ public class OpcUaSession implements OpcSession {
             return Stream.generate(() -> {
                 try {
                     OpcData ret = null;
-                    while ((ret = transferQueue.poll(refreshPeriod.toNanos(), TimeUnit.NANOSECONDS)) == null) {
+                    while ((ret = transferQueue.poll(publicationInterval.toNanos(), TimeUnit.NANOSECONDS)) == null) {
                         if (subscription == null) {
                             throw new OpcException("EOF reading tags. Disconnected");
                         }
@@ -274,10 +264,7 @@ public class OpcUaSession implements OpcSession {
                 }
             }).onClose(() -> removeSubscriptions(results));
 
-        } catch (
-                Exception e)
-
-        {
+        } catch (Exception e) {
             try {
                 removeSubscriptions(results);
             } finally {

@@ -294,7 +294,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             //block until connected
             client.connect().get(client.getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
             scheduler = executorServiceFactory.createScheduler();
-            scheduler.scheduleWithFixedDelay(this::checkAlive, 0, 1, TimeUnit.SECONDS);
+            scheduler.scheduleWithFixedDelay(this::checkAlive, 0, connectionProfile.getKeepAliveInterval().toNanos(), TimeUnit.NANOSECONDS);
             getStateAndSet(Optional.of(ConnectionState.CONNECTED));
         } catch (Exception e) {
             try {

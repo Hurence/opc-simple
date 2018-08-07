@@ -17,8 +17,6 @@
 
 package com.hurence.opc;
 
-import java.time.Duration;
-
 /**
  * Base class carrying information about a session.
  *
@@ -26,40 +24,5 @@ import java.time.Duration;
  */
 public abstract class SessionProfile<T extends SessionProfile> {
 
-    /**
-     * The item requested refresh period. The server may not support as low as you set.
-     * In this case the value will be refreshed at the server rate.
-     * If you need a very low refresh delay, please consider use direct read mode.
-     * Defaults to 1 second.
-     */
-    private Duration refreshPeriod = Duration.ofSeconds(1);
 
-    public final Duration getRefreshPeriod() {
-        return refreshPeriod;
-    }
-
-    public final void setRefreshPeriod(Duration refreshPeriod) {
-        if (refreshPeriod == null) {
-            throw new IllegalArgumentException("The refresh period must be any non null valid value.");
-        }
-        this.refreshPeriod = refreshPeriod;
-    }
-
-    /**
-     * Sets the refresh period.
-     *
-     * @param refreshPeriod the refresh period (non null).
-     * @return itself.
-     */
-    public final T withRefreshPeriod(Duration refreshPeriod) {
-        setRefreshPeriod(refreshPeriod);
-        return (T) this;
-    }
-
-    @Override
-    public String toString() {
-        return "SessionProfile{" +
-                "refreshPeriod=" + refreshPeriod +
-                '}';
-    }
 }

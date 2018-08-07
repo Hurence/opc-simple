@@ -76,17 +76,18 @@ public class JIVariantMarshaller {
             switch (type) {
                 case JIVariant.VT_EMPTY:
                 case JIVariant.VT_NULL:
-                case JIVariant.VT_ERROR:
                     return null;
+                case JIVariant.VT_ERROR:
+                    return extractError(variant);
                 case JIVariant.VT_I1:
                     return Byte.valueOf((byte) variant.getObjectAsChar());
                 case JIVariant.VT_I2:
                     return Short.valueOf(variant.getObjectAsShort());
                 case JIVariant.VT_I4:
+                case JIVariant.VT_INT:
                     return Integer.valueOf(variant.getObjectAsInt());
                 case JIVariant.VT_I8:
-                case JIVariant.VT_INT:
-                    return Long.valueOf(variant.getObjectAsInt());
+                    return Long.valueOf(variant.getObjectAsLong());
                 case JIVariant.VT_DATE:
                     return Instant.ofEpochMilli(variant.getObjectAsDate().getTime());
                 case JIVariant.VT_R4:
@@ -200,6 +201,7 @@ public class JIVariantMarshaller {
             case JIVariant.VT_INT:
             case JIVariant.VT_UI4:
             case JIVariant.VT_UINT:
+            case JIVariant.VT_ERROR:
                 return isArray ? Integer[].class : Integer.class;
             case JIVariant.VT_I8:
                 return isArray ? Long[].class : Long.class;

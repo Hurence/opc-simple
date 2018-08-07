@@ -19,6 +19,8 @@ package com.hurence.opc.da;
 
 import com.hurence.opc.SessionProfile;
 
+import java.time.Duration;
+
 /**
  * {@link SessionProfile} with OPC-DA customizations.
  *
@@ -31,6 +33,41 @@ public class OpcDaSessionProfile extends SessionProfile<OpcDaSessionProfile> {
      */
     private boolean directRead;
 
+
+    /**
+     * The item requested refresh interval. The server may not support as low as you set.
+     * In this case the value will be refreshed at the server rate.
+     * If you need a very low refresh delay, please consider use direct read mode.
+     * Defaults to 1 second.
+     */
+    private Duration refreshInterval = Duration.ofSeconds(1);
+
+    public final Duration getRefreshInterval() {
+        return refreshInterval;
+    }
+
+    /**
+     * Sets the refresh interval.
+     *
+     * @param refreshInterval the refresh interval (non null).
+     */
+    public final void setRefreshInterval(Duration refreshInterval) {
+        if (refreshInterval == null) {
+            throw new IllegalArgumentException("The refresh interval must be any non null valid value.");
+        }
+        this.refreshInterval = refreshInterval;
+    }
+
+    /**
+     * Sets the refresh interval.
+     *
+     * @param refreshInterval the refresh interval (non null).
+     * @return itself.
+     */
+    public final OpcDaSessionProfile withRefreshInterval(Duration refreshInterval) {
+        setRefreshInterval(refreshInterval);
+        return this;
+    }
 
     public boolean isDirectRead() {
         return directRead;
@@ -49,6 +86,7 @@ public class OpcDaSessionProfile extends SessionProfile<OpcDaSessionProfile> {
     public String toString() {
         return "OpcDaSessionProfile{" +
                 "directRead=" + directRead +
+                ", refreshInterval=" + refreshInterval +
                 "} " + super.toString();
     }
 }

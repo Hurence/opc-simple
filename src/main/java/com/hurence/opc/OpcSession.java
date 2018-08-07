@@ -48,10 +48,12 @@ public interface OpcSession extends AutoCloseable {
 
     /**
      * Continuously read a stream of tags.
+     * When stream is requested, a subscription is done and values are output only in case they change.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues. In this case the streaming will be interrupted.
      *
-     * @param tags the tags to be read.
+     * @param subscriptionConfiguration the never null subscription options (See {@link SubscriptionConfiguration}
+     * @param tags                      the tags to be read.
      * @return a java {@link Stream}.
      */
-    Stream<OpcData> stream(String... tags);
+    Stream<OpcData> stream(SubscriptionConfiguration subscriptionConfiguration, String... tags);
 }
