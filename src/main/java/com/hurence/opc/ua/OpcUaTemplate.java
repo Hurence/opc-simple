@@ -441,7 +441,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
                             UInteger.valueOf(BrowseResultMask.All.getValue()))).get().getReferences())
                     .filter(referenceDescription -> referenceDescription.getNodeId().local().isPresent())
                     .collect(Collectors.toMap(referenceDescription -> referenceDescription.getNodeId().local().get(),
-                            Function.identity(), (k1, k2) -> k1));
+                            Function.identity(), (k1, k2) -> k1, LinkedHashMap::new));
 
             return results.values().stream()
                     .filter(referenceDescription -> !referenceDescription.getTypeDefinition().isLocal() ||

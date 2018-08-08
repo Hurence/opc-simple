@@ -35,10 +35,6 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
      * The com program id.
      */
     private String comProgId;
-    /**
-     * The domain name.
-     */
-    private String domain;
 
 
     public String getComClsId() {
@@ -57,14 +53,6 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
         this.comProgId = comProgId;
     }
 
-    public String getDomain() {
-        return domain;
-    }
-
-    public void setDomain(String domain) {
-        this.domain = domain;
-    }
-
 
     public OpcDaConnectionProfile withComClsId(String comClsId) {
         setComClsId(comClsId);
@@ -76,18 +64,12 @@ public class OpcDaConnectionProfile extends ConnectionProfile<OpcDaConnectionPro
         return this;
     }
 
-    public OpcDaConnectionProfile withDomain(String domain) {
-        setDomain(domain);
-        return this;
-    }
-
 
     @Override
     public String toString() {
         return "OpcDaConnectionProfile{" +
                 "comClsId='" + comClsId + '\'' +
                 ", comProgId='" + comProgId + '\'' +
-                ", domain='" + domain + '\'' +
                 '}';
     }
 }

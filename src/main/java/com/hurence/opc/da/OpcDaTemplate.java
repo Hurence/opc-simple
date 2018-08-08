@@ -19,7 +19,7 @@ package com.hurence.opc.da;
 
 import com.hurence.opc.*;
 import com.hurence.opc.auth.Credentials;
-import com.hurence.opc.auth.UsernamePasswordCredentials;
+import com.hurence.opc.auth.NtlmCredentials;
 import com.hurence.opc.exception.OpcException;
 import com.hurence.opc.util.ExecutorServiceFactory;
 import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
@@ -55,6 +55,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     static {
         //enable surrogates auto-registration
         JISystem.setAutoRegisteration(true);
+        JISystem.setJavaCoClassAutoCollection(false);
     }
 
     private static final Logger logger = LoggerFactory.getLogger(OpcDaTemplate.class);
@@ -120,13 +121,14 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
         Credentials credentials = connectionProfile.getCredentials();
 
-        if (credentials != null && !(credentials instanceof UsernamePasswordCredentials)) {
+        if (credentials != null && !(credentials instanceof NtlmCredentials)) {
             throw new OpcException("Credentials " + credentials.getClass().getCanonicalName() +
-                    " is not supported by OPC-DA connector");
+                    " is not supported by OPC-DA connector. Please use " + NtlmCredentials.class.getCanonicalName());
         }
 
-        String username = ((UsernamePasswordCredentials) credentials).getUser();
-        String password = ((UsernamePasswordCredentials) credentials).getPassword();
+        String username = ((NtlmCredentials) credentials).getUser();
+        String password = ((NtlmCredentials) credentials).getPassword();
+        String domain = ((NtlmCredentials) credentials).getDomain();
 
 
         ConnectionState cs = getConnectionState();
@@ -138,16 +140,14 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
             //ugly: custom port not supported by UtGard since hardcoded?
             String connectionString = connectionProfile.getConnectionUri().getHost();
             if (connectionProfile.getComClsId() != null) {
-                this.session = JISession.createSession(connectionProfile.getDomain(),
-                        username, password);
+                this.session = JISession.createSession(domain, username, password);
                 if (connectionProfile.getSocketTimeout() != null) {
                     this.session.setGlobalSocketTimeout((int) connectionProfile.getSocketTimeout().toMillis());
                 }
                 this.comServer = new JIComServer(JIClsid.valueOf(connectionProfile.getComClsId()),
                         connectionString, this.session);
             } else if (connectionProfile.getComProgId() != null) {
-                this.session = JISession.createSession(connectionProfile.getDomain(),
-                        username, password);
+                this.session = JISession.createSession(domain, username, password);
                 if (connectionProfile.getSocketTimeout() != null) {
                     this.session.setGlobalSocketTimeout((int) connectionProfile.getSocketTimeout().toMillis());
                 }

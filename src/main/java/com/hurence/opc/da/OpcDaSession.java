@@ -92,7 +92,7 @@ public class OpcDaSession implements OpcSession {
      * @param opcServer
      */
     public void cleanup(OPCServer opcServer) {
-        logger.info("Destroying DCOM session");
+        logger.info("Cleaning session");
 
         try {
             opcServer.removeGroup(group, true);

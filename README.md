@@ -76,9 +76,8 @@ Please feel free to change connection settings reflecting your real environment.
    OpcDaConnectionProfile connectionProfile = new OpcDaConnectionProfile()
          //change with the appropriate clsid
         .withComClsId("F8582CF2-88FB-11D0-B850-00C0F0104305")
-        //change with your domain
-        .withDomain("OPC-DOMAIN")
-        .withCredentials(new UsernamePasswordCredentials()
+        .withCredentials(new NtLmCredentials()
+            .withDomain("OPC-DOMAIN")
             .withUser("OPC")
             .withPassword("opc"))
         .withConnectionUri(new URI("opc.da://192.168.99.100"))

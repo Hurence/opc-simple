@@ -18,7 +18,7 @@
 package com.hurence.opc.da;
 
 import com.hurence.opc.*;
-import com.hurence.opc.auth.UsernamePasswordCredentials;
+import com.hurence.opc.auth.NtlmCredentials;
 import com.hurence.opc.exception.OpcException;
 import com.hurence.opc.util.AutoReconnectOpcOperations;
 import org.jinterop.dcom.core.JIVariant;
@@ -54,8 +54,8 @@ public class OpcDaTemplateTest {
         opcDaOperations = new OpcDaTemplate();
         connectionProfile = new OpcDaConnectionProfile()
                 .withComClsId("F8582CF2-88FB-11D0-B850-00C0F0104305")
-                .withDomain("OPC-9167C0D9342")
-                .withCredentials(new UsernamePasswordCredentials()
+                .withCredentials(new NtlmCredentials()
+                        .withDomain("OPC-9167C0D9342")
                         .withUser("OPC")
                         .withPassword("opc"))
                 .withConnectionUri(new URI("opc.da://192.168.99.100:135"))
@@ -88,7 +88,7 @@ public class OpcDaTemplateTest {
 
     @Test
     public void testFetchMetadata() {
-        opcDaOperations.fetchMetadata("Random.Coucou")
+        opcDaOperations.fetchMetadata("Random.Real8")
                 .forEach(System.out::println);
     }
 
