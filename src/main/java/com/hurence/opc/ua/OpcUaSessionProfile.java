@@ -20,10 +20,6 @@ package com.hurence.opc.ua;
 import com.hurence.opc.SessionProfile;
 
 import java.time.Duration;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
 
 /**
  * OPC-UA {@link SessionProfile}
@@ -33,102 +29,43 @@ import java.util.Objects;
 public class OpcUaSessionProfile extends SessionProfile<OpcUaSessionProfile> {
 
     /**
-     * A map holding polling information about every tag that should be read.
+     * The data publication interval (we ask the server to publish at this rate).
      */
-    private final Map<String, Duration> pollingMap = new HashMap<>();
+    private Duration defaultPublicationInterval = Duration.ofSeconds(1);
 
     /**
-     * The default polling interval.
-     */
-    private Duration defaultPollingInterval;
-
-    /**
-     * Get the mapping between a tag and it's polling interval.
+     * Get The data publication interval (we ask the server to publish at this rate).
      *
-     * @return a {@link Map}
+     * @return a {@link Duration}
      */
-    public Map<String, Duration> getPollingMap() {
-        return Collections.unmodifiableMap(pollingMap);
+    public Duration getDefaultPublicationInterval() {
+        return defaultPublicationInterval;
     }
 
     /**
-     * Sets the polling map with the value of the (non-nullable) pollingMap.
+     * Set data publication interval (we ask the server to publish at this rate).
      *
-     * @param pollingMap the {@link Map} containing the mapping to set.
+     * @param defaultPublicationInterval the never null publication interval.
+     */
+    public void setDefaultPublicationInterval(Duration defaultPublicationInterval) {
+        this.defaultPublicationInterval = defaultPublicationInterval;
+    }
+
+    /**
+     * Set data publication interval (we ask the server to publish at this rate).
+     *
+     * @param defaultPublicationInterval the never null publication interval.
      * @return itself.
      */
-    public OpcUaSessionProfile withPollingMapFrom(Map<String, Duration> pollingMap) {
-        pollingMap.putAll(pollingMap);
+    public OpcUaSessionProfile withDefaultPublicationInterval(Duration defaultPublicationInterval) {
+        setDefaultPublicationInterval(defaultPublicationInterval);
         return this;
-    }
-
-    /**
-     * Add a mapping to the polling map.
-     *
-     * @param tag             the tag to map
-     * @param pollingInterval the polling interval to be linked to the tag
-     * @return itself.
-     */
-    public OpcUaSessionProfile addToPollingMap(String tag, Duration pollingInterval) {
-        pollingMap.put(tag, pollingInterval);
-        return this;
-    }
-
-    /**
-     * Gets the default polling interval.
-     *
-     * @return a {@link Duration}. Can be null.
-     */
-    public Duration getDefaultPollingInterval() {
-        return defaultPollingInterval;
-    }
-
-
-    /**
-     * Set the default polling interval.
-     * <p>
-     * This value will be used in case a tag has no specific mapping in the polling table.
-     * If the value is not set, the base refresh period {@link SessionProfile#refreshPeriod} will be used.
-     *
-     * @param defaultPollingInterval the default polling interval
-     */
-    public void setDefaultPollingInterval(Duration defaultPollingInterval) {
-        this.defaultPollingInterval = defaultPollingInterval;
-    }
-
-    /**
-     * Set the default polling interval.
-     * <p>
-     * This value will be used in case a tag has no specific mapping in the polling table.
-     * If the value is not set, the base refresh period {@link SessionProfile#refreshPeriod} will be used.
-     *
-     * @param defaultPollingInterval the default polling interval
-     * @return itself.
-     */
-    public OpcUaSessionProfile withDefaultPollingInterval(Duration defaultPollingInterval) {
-        setDefaultPollingInterval(defaultPollingInterval);
-        return this;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        OpcUaSessionProfile that = (OpcUaSessionProfile) o;
-        return Objects.equals(pollingMap, that.pollingMap) &&
-                Objects.equals(defaultPollingInterval, that.defaultPollingInterval);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(pollingMap, defaultPollingInterval);
     }
 
     @Override
     public String toString() {
         return "OpcUaSessionProfile{" +
-                "pollingMap=" + pollingMap +
-                ", defaultPollingInterval=" + defaultPollingInterval +
+                "defaultPublicationInterval=" + defaultPublicationInterval +
                 "} " + super.toString();
     }
 }

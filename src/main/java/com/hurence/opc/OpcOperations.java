@@ -56,7 +56,7 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
     ConnectionState getConnectionState();
 
     /**
-     * Retrieves the list of tags (or Items).
+     * Retrieves the list of tags.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
      *
      * @return a never null {@link Collection}
@@ -64,7 +64,17 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
     Collection<OpcTagInfo> browseTags();
 
     /**
-     * Fetch metadata of provided items.
+     * Inspects the OPC tree starting from the provided tree (empty is the root) and returns only the next level.
+     * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
+     *
+     * @param rootTagId the root tag to begin exploring from.
+     *
+     * @return a never null {@link Collection} of {@link OpcObjectInfo} (may also be {@link OpcTagInfo} in case is a leaf)
+     */
+    Collection<OpcObjectInfo> fetchNextTreeLevel(String rootTagId);
+
+    /**
+     * Fetch metadata of provided tags.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
      *
      * @param tagIds the id of tags to fetch.

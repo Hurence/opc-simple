@@ -17,10 +17,7 @@
 
 package com.hurence.opc.ua;
 
-import com.hurence.opc.AbstractOpcOperations;
-import com.hurence.opc.ConnectionState;
-import com.hurence.opc.OpcTagInfo;
-import com.hurence.opc.OpcTagProperty;
+import com.hurence.opc.*;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
@@ -55,7 +52,6 @@ import org.eclipse.milo.opcua.stack.core.types.enumerated.BrowseResultMask;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.ServerState;
 import org.eclipse.milo.opcua.stack.core.types.structured.BrowseDescription;
-import org.eclipse.milo.opcua.stack.core.types.structured.BrowseResult;
 import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
 import org.eclipse.milo.opcua.stack.core.types.structured.ReferenceDescription;
 import org.eclipse.milo.opcua.stack.core.util.CertificateUtil;
@@ -71,6 +67,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -297,7 +294,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             //block until connected
             client.connect().get(client.getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
             scheduler = executorServiceFactory.createScheduler();
-            scheduler.scheduleWithFixedDelay(this::checkAlive, 0, 1, TimeUnit.SECONDS);
+            scheduler.scheduleWithFixedDelay(this::checkAlive, 0, connectionProfile.getKeepAliveInterval().toNanos(), TimeUnit.NANOSECONDS);
             getStateAndSet(Optional.of(ConnectionState.CONNECTED));
         } catch (Exception e) {
             try {
@@ -348,26 +345,15 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             try {
                 NodeId target = NodeId.parse(t);
                 Node node = client.getAddressSpace().createNode(target).get();
-                //build the path first
-                LinkedList<String> path = new LinkedList<>();
-                while (target != null) {
-                    BrowseResult browseResult = client.browse(new BrowseDescription(target, BrowseDirection.Inverse, Identifiers.References, true,
-                            UInteger.valueOf(NodeClass.Object.getValue() | NodeClass.Variable.getValue()),
-                            UInteger.valueOf(BrowseResultMask.All.getValue()))).get();
-                    ReferenceDescription next = Arrays.stream(browseResult.getReferences()).findFirst().orElse(null);
-                    if (next != null && next.getNodeId().isLocal() && !Identifiers.RootFolder.equals(next.getNodeId().local().get())) {
-                        path.addFirst(next.getBrowseName().getName());
-                        target = next.getNodeId().local().get();
-                    } else {
-                        target = null;
-                    }
+
+                if (!(node instanceof VariableNode)) {
+                    throw new IllegalArgumentException("Tag " + t + " is not a Variable node");
                 }
-                Stack<Node> toProcess = new Stack<>();
-                toProcess.push(node);
+
                 List<OpcTagInfo> tmp = new ArrayList<>();
-                browse(toProcess, null, tmp);
+                browse(node.getNodeId().get(), null, tmp);
                 if (!tmp.isEmpty()) {
-                    ret.add(tmp.get(0).withGroup(path.stream().collect(Collectors.joining("."))));
+                    ret.add(tmp.get(0));
                 }
             } catch (Exception e) {
                 throw new OpcException("Unable to fetch metadata for tag " + t, e);
@@ -382,17 +368,16 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
      * Internally browse the whole tag tree with a DFS algorithm.
      * It retains only {@link VariableNode} objects.
      *
-     * @param path        the root path.
+     * @param root        the root path.
      * @param prevTagInfo the previous found tag (only if coming from -1 level.) This is used to decorate
      *                    a variable node tag with properties found in level +1.
      * @param result      the result collection container.
      * @throws Exception in case of any issue.
      */
-    private void browse(Stack<Node> path, OpcTagInfo prevTagInfo, Collection<OpcTagInfo> result) throws Exception {
-        Node n = path.isEmpty() ? null : path.peek();
-        NodeId current = null;
+    private void browse(NodeId root, OpcTagInfo prevTagInfo, Collection<OpcTagInfo> result) throws Exception {
+        Node n;
         try {
-            current = n == null ? Identifiers.RootFolder : n.getNodeId().get();
+            n = client.getAddressSpace().createNode(root).get();
         } catch (Exception e) {
             logger.warn("Unable to read after tag {} : {}", prevTagInfo, e.getMessage());
             return;
@@ -427,15 +412,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
                 Optional<Class<?>> cls = UaVariantMarshaller.findJavaClass(client, n.getNodeId().get());
                 if (cls.isPresent()) {
                     currentTagInfo = new OpcTagInfo(nodeId.toParseableString())
-                            .withGroup(path.stream().limit(path.size() - 1)
-                                    .map(theNode -> {
-                                        try {
-                                            return theNode.getBrowseName().get().getName();
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    }).collect(Collectors.joining(".")))
-                            .withName(path.peek().getBrowseName().get().getName())
+                            .withName(n.getBrowseName().get().getName())
                             .withType(cls.get());
                     result.add(fillOpcTagInformation(currentTagInfo, vn));
                 }
@@ -444,12 +421,10 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
         }
         //browse next
-        List<Node> nodes = client.getAddressSpace().browse(current).get();
+        List<Node> nodes = client.getAddressSpace().browse(root).get();
         if (nodes != null && !nodes.isEmpty()) {
             for (Node child : nodes) {
-                path.push(child);
-                browse(path, currentTagInfo, result);
-                path.pop();
+                browse(child.getNodeId().get(), currentTagInfo, result);
             }
         }
 
@@ -457,10 +432,37 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
 
     @Override
+    public Collection<OpcObjectInfo> fetchNextTreeLevel(String rootTagId) {
+        try {
+            Map<NodeId, ReferenceDescription> results = Arrays.stream(
+                    client.browse(new BrowseDescription(NodeId.parse(rootTagId), BrowseDirection.Forward,
+                            Identifiers.HierarchicalReferences, true,
+                            UInteger.valueOf(NodeClass.Object.getValue() | NodeClass.Variable.getValue()),
+                            UInteger.valueOf(BrowseResultMask.All.getValue()))).get().getReferences())
+                    .filter(referenceDescription -> referenceDescription.getNodeId().local().isPresent())
+                    .collect(Collectors.toMap(referenceDescription -> referenceDescription.getNodeId().local().get(),
+                            Function.identity(), (k1, k2) -> k1, LinkedHashMap::new));
+
+            return results.values().stream()
+                    .filter(referenceDescription -> !referenceDescription.getTypeDefinition().isLocal() ||
+                            !referenceDescription.getTypeDefinition().local().get().equals(Identifiers.PropertyType))
+                    .map(referenceDescription -> (NodeClass.Object.equals(referenceDescription.getNodeClass()) ?
+                            new OpcContainerInfo(referenceDescription.getNodeId().local().get().toParseableString()) :
+                            new OpcTagInfo(referenceDescription.getNodeId().local().get().toParseableString()))
+                            .withDescription(referenceDescription.getDisplayName().getText())
+                            .withName(referenceDescription.getBrowseName().getName()))
+                    .collect(Collectors.toList());
+
+        } catch (Exception e) {
+            throw new OpcException("Unable to browse OPC address space", e);
+        }
+    }
+
+    @Override
     public Collection<OpcTagInfo> browseTags() {
         Set<OpcTagInfo> ret = new LinkedHashSet<>();
         try {
-            browse(new Stack<>(), null, ret);
+            browse(Identifiers.RootFolder, null, ret);
         } catch (Exception e) {
             throw new OpcException("Unable to browse tags", e);
         }

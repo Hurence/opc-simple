@@ -18,11 +18,18 @@
 package com.hurence.opc;
 
 /**
- * Base class carrying information about a session.
+ * Base class to be used for branches and opc folders.
  *
  * @author amarziali
  */
-public abstract class SessionProfile<T extends SessionProfile> {
+public class OpcContainerInfo extends OpcObjectInfo<OpcContainerInfo> {
 
+    public OpcContainerInfo(String id) {
+        super(id);
+    }
 
+    @Override
+    public String toString() {
+        return "OpcContainerInfo{} " + super.toString();
+    }
 }

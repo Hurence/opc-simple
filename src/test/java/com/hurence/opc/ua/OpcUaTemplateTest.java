@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcTagInfo;
 import com.hurence.opc.OperationStatus;
+import com.hurence.opc.SubscriptionConfiguration;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
@@ -165,8 +166,7 @@ public class OpcUaTemplateTest {
             ObjectMapper mapper = new ObjectMapper();
             mapper.findAndRegisterModules();
             logger.info("{}", mapper.writeValueAsString(ret));
-            Optional<OpcTagInfo> sint = ret.stream().filter(t -> "SinT".equals(t.getName()) &&
-                    "Objects.TestFolder".equals(t.getGroup()))
+            Optional<OpcTagInfo> sint = ret.stream().filter(t -> "SinT".equals(t.getName()))
                     .findFirst();
             Assert.assertTrue(sint.isPresent());
             Assert.assertFalse(ret.isEmpty());
@@ -182,7 +182,7 @@ public class OpcUaTemplateTest {
             Collection<OpcTagInfo> ret = opcUaTemplate.fetchMetadata("ns=2;s=sint");
             logger.info("Metadata: {}", ret);
             Assert.assertEquals(1, ret.size());
-            Assert.assertEquals("Objects.TestFolder", ret.stream().findFirst().get().getGroup());
+
         }
     }
 
@@ -191,7 +191,7 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createConnectionProfile());
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withRefreshPeriod(Duration.ofMillis(10)));
+            );
             logger.info("Read tag {}", session.read("ns=2;s=sint"));
         }
     }
@@ -201,7 +201,7 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createConnectionProfile());
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withRefreshPeriod(Duration.ofMillis(10)));
+            );
             List<OperationStatus> result = session.write(
                     new OpcData("ns=2;s=HelloWorld/Dynamic/Double", Instant.now(), 3.1415d),
                     new OpcData("ns=2;s=sint", Instant.now(), true)
@@ -219,14 +219,25 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createConnectionProfile());
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withDefaultPollingInterval(Duration.ofMillis(1))
-                    .withRefreshPeriod(Duration.ofMillis(100)))) {
+                    .withDefaultPublicationInterval(Duration.ofMillis(100))
+            )) {
                 final List<OpcData<Double>> values = new ArrayList<>();
-                session.stream("ns=2;s=sint").limit(1000).forEach(values::add);
+                session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
+                        "ns=2;s=sint").limit(1000).forEach(opcData -> {
+                    System.err.println(opcData);
+                    values.add(opcData);
+                });
                 logger.info("Received {} items", values.size());
-                values.stream().map(OpcData::getValue).forEach(System.err::println);
-                logger.info("Stream result: {}", values);
             }
+        }
+    }
+
+    @Test
+    public void testfetchNextTreeLevel() throws Exception {
+        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            opcUaTemplate.connect(createConnectionProfile());
+            Assert.assertEquals(3, opcUaTemplate.fetchNextTreeLevel("ns=0;i=84").size());
+            Assert.assertTrue(opcUaTemplate.fetchNextTreeLevel("ns=2;s=sint").isEmpty());
         }
     }
 
@@ -237,16 +248,20 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createProsysConnectionProfile());
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withDefaultPollingInterval(Duration.ofMillis(10))
-                    .withRefreshPeriod(Duration.ofMillis(100)))) {
+                    .withDefaultPublicationInterval(Duration.ofMillis(1000)))) {
                 final List<OpcData<Double>> values = new ArrayList<>();
-                session.stream("ns=5;s=Sawtooth1").limit(1000).forEach(values::add);
+                session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
+                        "ns=5;s=Sawtooth1").limit(1000).map(a -> {
+                    System.out.println(a);
+                    return a;
+                }).forEach(values::add);
 
                 logger.info("Stream result: {}", values);
                 values.stream().map(OpcData::getTimestamp).forEach(System.err::println);
 
             }
         }
+
     }
 
 
@@ -256,9 +271,10 @@ public class OpcUaTemplateTest {
         try (OpcUaOperations opcUaTemplate = AutoReconnectOpcOperations.create(new OpcUaTemplate())) {
             opcUaTemplate.connect(createProsysConnectionProfile());
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withDefaultPollingInterval(Duration.ofMillis(10))
-                    .withRefreshPeriod(Duration.ofMillis(100)))) {
-                session.stream("ns=5;s=Sawtooth1").limit(1000).forEach(System.err::println);
+                    .withDefaultPublicationInterval(Duration.ofMillis(10))
+            )) {
+                session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(100)), "ns=5;s=Sawtooth1")
+                        .limit(1000).forEach(System.err::println);
                 //disconnect here
             } catch (OpcException e) {
                 //we have an EOF. Normal
@@ -267,10 +283,11 @@ public class OpcUaTemplateTest {
             //connect here
             Assert.assertTrue(opcUaTemplate.awaitConnected());
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withDefaultPollingInterval(Duration.ofMillis(100))
-                    .withRefreshPeriod(Duration.ofMillis(100)))) {
+                    .withDefaultPublicationInterval(Duration.ofMillis(100))
+            )) {
 
-                session.stream("ns=5;s=Sawtooth1").limit(100).forEach(System.err::println);
+                session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(100)), "ns=5;s=Sawtooth1")
+                        .limit(100).forEach(System.err::println);
             }
         }
     }
@@ -281,7 +298,7 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createProsysConnectionProfile());
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withRefreshPeriod(Duration.ofMillis(10)));
+            );
             logger.info("Read tag {}", session.read("ns=5;s=Sawtooth1"));
         }
     }
