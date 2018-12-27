@@ -29,7 +29,7 @@ Add The maven dependency
 <dependency>
     <groupId>com.github.Hurence</groupId>
     <artifactId>opc-simple</artifactId>
-    <version>2.0.0</version>
+    <version>2.0.1</version>
 </dependency>
 
 ```
