@@ -39,14 +39,7 @@ And the needed repositories
 
 ```
 
-    <repositories>
-        <repository>
-            <id>openscada</id>
-            <url>http://neutronium.openscada.org/maven/</url>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
-        </repository>
+    <repositories>       
         repository>
             <id>jitpack.io</id>
             <url>https://jitpack.io</url>
