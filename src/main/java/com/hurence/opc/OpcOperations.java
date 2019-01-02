@@ -18,9 +18,9 @@
 package com.hurence.opc;
 
 import io.reactivex.Completable;
+import io.reactivex.Flowable;
 import io.reactivex.Observable;
-
-import java.util.Collection;
+import io.reactivex.Single;
 
 /**
  * Base Interface to describe OPC releated operations
@@ -62,28 +62,27 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
      * Retrieves the list of tags.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
      *
-     * @return a never null {@link Collection}
+     * @return a {@link Flowable} stream of {@link OpcTagInfo}
      */
-    Collection<OpcTagInfo> browseTags();
+    Flowable<OpcTagInfo> browseTags();
 
     /**
      * Inspects the OPC tree starting from the provided tree (empty is the root) and returns only the next level.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
      *
      * @param rootTagId the root tag to begin exploring from.
-     *
-     * @return a never null {@link Collection} of {@link OpcObjectInfo} (may also be {@link OpcTagInfo} in case is a leaf)
+     * @return a {@link Flowable} stream of {@link OpcObjectInfo} (may also be {@link OpcTagInfo} in case is a leaf)
      */
-    Collection<OpcObjectInfo> fetchNextTreeLevel(String rootTagId);
+    Flowable<OpcObjectInfo> fetchNextTreeLevel(String rootTagId);
 
     /**
      * Fetch metadata of provided tags.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
      *
      * @param tagIds the id of tags to fetch.
-     * @return a never null {@link Collection}
+     * @return a {@link Flowable} stream of {@link OpcTagInfo}
      */
-    Collection<OpcTagInfo> fetchMetadata(String... tagIds);
+    Flowable<OpcTagInfo> fetchMetadata(String... tagIds);
 
     /**
      * Create a new {@link OpcSession} and attach to the current connection.
@@ -92,16 +91,16 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
      * @param sessionProfile the information about the session to be created.
      * @return the session.
      */
-    V createSession(U sessionProfile);
+    Single<V> createSession(U sessionProfile);
 
 
     /**
      * Clear up the session and detatch it from the current session.
      *
      * @param session the session to be destroyed.
+     * @return a {@link Completable} operation.
      */
-    void releaseSession(V session);
-
+    Completable releaseSession(V session);
 
 
 }

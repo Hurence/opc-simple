@@ -18,15 +18,12 @@
 package com.hurence.opc.ua;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hurence.opc.OpcData;
-import com.hurence.opc.OpcTagInfo;
-import com.hurence.opc.OperationStatus;
-import com.hurence.opc.SubscriptionConfiguration;
+import com.hurence.opc.*;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
-import io.reactivex.Single;
+import io.reactivex.subscribers.TestSubscriber;
 import org.eclipse.milo.opcua.stack.core.util.SelfSignedCertificateGenerator;
 import org.junit.*;
 import org.slf4j.Logger;
@@ -158,13 +155,27 @@ public class OpcUaTemplateTest {
     }
 
     @Test
+    public void testReactiveBrowse() throws Exception {
+        try (final OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
+            TestSubscriber<OpcTagInfo> subscriber = new TestSubscriber<>();
+            opcUaTemplate.connect(createConnectionProfile())
+                    .andThen(opcUaTemplate.browseTags())
+                    .onBackpressureBuffer(100)
+                    .subscribe(subscriber);
+            subscriber.assertComplete();
+            subscriber.assertValueCount(229);
+        }
+    }
+
+    @Test
     public void testBrowse() throws Exception {
 
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             Collection<OpcTagInfo> ret =
                     opcUaTemplate.connect(createConnectionProfile())
-                            .andThen(Single.fromCallable(() -> opcUaTemplate.browseTags()))
-                            .blockingGet();
+                            .andThen(opcUaTemplate.browseTags())
+                            .toList().blockingGet();
+
             ObjectMapper mapper = new ObjectMapper();
             mapper.findAndRegisterModules();
             logger.info("{}", mapper.writeValueAsString(ret));
@@ -183,8 +194,8 @@ public class OpcUaTemplateTest {
 
             Collection<OpcTagInfo> ret =
                     opcUaTemplate.connect(createConnectionProfile())
-                            .andThen(Single.fromCallable(() -> opcUaTemplate.fetchMetadata("ns=2;s=sint")))
-                            .blockingGet();
+                            .andThen(opcUaTemplate.fetchMetadata("ns=2;s=sint"))
+                            .toList().blockingGet();
 
             logger.info("Metadata: {}", ret);
             Assert.assertEquals(1, ret.size());
@@ -197,7 +208,7 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-            );
+            ).blockingGet();
             logger.info("Read tag {}", session.read("ns=2;s=sint"));
         }
     }
@@ -207,7 +218,7 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-            );
+            ).blockingGet();
             List<OperationStatus> result = session.write(
                     new OpcData("ns=2;s=HelloWorld/Dynamic/Double", Instant.now(), 3.1415d),
                     new OpcData("ns=2;s=sint", Instant.now(), true)
@@ -226,7 +237,7 @@ public class OpcUaTemplateTest {
             opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withDefaultPublicationInterval(Duration.ofMillis(100))
-            )) {
+            ).blockingGet()) {
                 final List<OpcData<Double>> values = new ArrayList<>();
                 session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
                         "ns=2;s=sint").limit(1000).forEach(opcData -> {
@@ -241,9 +252,17 @@ public class OpcUaTemplateTest {
     @Test
     public void testfetchNextTreeLevel() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
-            Assert.assertEquals(3, opcUaTemplate.fetchNextTreeLevel("ns=0;i=84").size());
-            Assert.assertTrue(opcUaTemplate.fetchNextTreeLevel("ns=2;s=sint").isEmpty());
+            TestSubscriber<OpcObjectInfo> subscriber1 = new TestSubscriber<>();
+            TestSubscriber<OpcObjectInfo> subscriber2 = new TestSubscriber<>();
+
+            opcUaTemplate.connect(createConnectionProfile())
+                    .doOnComplete(() -> opcUaTemplate.fetchNextTreeLevel("ns=0;i=84").subscribe(subscriber1))
+                    .doOnComplete(() -> opcUaTemplate.fetchNextTreeLevel("ns=2;s=sint").subscribe(subscriber2))
+                    .blockingAwait();
+            subscriber1.assertComplete();
+            subscriber1.assertValueCount(3);
+            subscriber2.assertComplete();
+            subscriber2.assertValueCount(0);
         }
     }
 
@@ -254,7 +273,7 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createProsysConnectionProfile()).blockingAwait();
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withDefaultPublicationInterval(Duration.ofMillis(1000)))) {
+                    .withDefaultPublicationInterval(Duration.ofMillis(1000))).blockingGet()) {
                 final List<OpcData<Double>> values = new ArrayList<>();
                 session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
                         "ns=5;s=Sawtooth1").limit(1000).map(a -> {
@@ -306,7 +325,7 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createProsysConnectionProfile()).blockingAwait();
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-            );
+            ).blockingGet();
             logger.info("Read tag {}", session.read("ns=5;s=Sawtooth1"));
         }
     }

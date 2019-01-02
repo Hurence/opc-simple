@@ -73,7 +73,7 @@ public class OpcDaTemplateTest {
 
     @Test
     public void testBrowseTags() {
-        logger.info("Received following tags {}", opcDaOperations.browseTags());
+        logger.info("Received following tags {}", opcDaOperations.browseTags().toList().blockingGet());
     }
 
     @Test
@@ -95,7 +95,7 @@ public class OpcDaTemplateTest {
                 .withDirectRead(false)
                 .withRefreshInterval(Duration.ofMillis(300));
 
-        try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
+        try (OpcSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
             List<Instant> received = session.stream(
                     new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10))
                             .withTagSamplingIntervalForTag("Square Waves.Real8", Duration.ofSeconds(1)),
@@ -121,7 +121,7 @@ public class OpcDaTemplateTest {
                 .withRefreshInterval(Duration.ofMillis(300));
 
 
-        try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
+        try (OpcSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
             new Thread(() -> {
                 try {
                     Thread.sleep(5000);
@@ -153,7 +153,7 @@ public class OpcDaTemplateTest {
                 .withDirectRead(false)
                 .withRefreshInterval(Duration.ofMillis(300));
 
-        try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
+        try (OpcSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
             Assert.assertEquals(20, session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
                     "Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
                     .limit(20)
@@ -174,7 +174,7 @@ public class OpcDaTemplateTest {
         OpcDaSession session = null;
 
         try {
-            session = opcDaOperations.createSession(sessionProfile);
+            session = opcDaOperations.createSession(sessionProfile).blockingGet();
             OpcData<String> result = null;
 
             OperationStatus lastQuality;
@@ -199,7 +199,7 @@ public class OpcDaTemplateTest {
         OpcDaSession session = null;
 
         try {
-            session = opcDaOperations.createSession(sessionProfile);
+            session = opcDaOperations.createSession(sessionProfile).blockingGet();
             session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(500)),
                     "Random.ArrayOfString")
                     .limit(20)
@@ -220,9 +220,9 @@ public class OpcDaTemplateTest {
         OpcDaSession session = null;
 
         try {
-            session = opcDaOperations.createSession(sessionProfile);
+            session = opcDaOperations.createSession(sessionProfile).blockingGet();
             session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(100)),
-                    opcDaOperations.browseTags().stream().map(OpcTagInfo::getId).toArray(a -> new String[a]))
+                    opcDaOperations.browseTags().toList().blockingGet().stream().map(OpcTagInfo::getId).toArray(a -> new String[a]))
                     .limit(10000)
                     .forEach(System.out::println);
         } finally {
@@ -237,7 +237,7 @@ public class OpcDaTemplateTest {
                 .withRefreshInterval(Duration.ofSeconds(1))
                 .withDataTypeForTag("Bucket Brigade.Int4", (short) JIVariant.VT_R8);
 
-        try (OpcDaSession session = opcDaOperations.createSession(sessionProfile)) {
+        try (OpcDaSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
             OpcData data = session.read("Bucket Brigade.Int4").get(0);
             System.out.println(data);
             Assert.assertNotNull(data);
@@ -253,7 +253,7 @@ public class OpcDaTemplateTest {
                 .withDirectRead(false)
                 .withRefreshInterval(Duration.ofMillis(300));
 
-        try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
+        try (OpcSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
             session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(500)),
                     "I do not exist")
                     .forEach(System.out::println);
@@ -268,7 +268,7 @@ public class OpcDaTemplateTest {
         OpcDaSession session = null;
 
         try {
-            session = opcDaOperations.createSession(sessionProfile);
+            session = opcDaOperations.createSession(sessionProfile).blockingGet();
             Collection<OperationStatus> result =
                     session.write(new OpcData<>("Square Waves.Real8", Instant.now(), 123.31));
             logger.info("Write result: {}", result);
@@ -289,7 +289,7 @@ public class OpcDaTemplateTest {
         OpcDaSession session = null;
 
         try {
-            session = opcDaOperations.createSession(sessionProfile);
+            session = opcDaOperations.createSession(sessionProfile).blockingGet();
             Collection<OperationStatus> result = session.write(new OpcData("Square Waves.Real8", Instant.now(), "I'm not a number"));
             logger.info("Write result: {}", result);
             Assert.assertFalse(result.stream()
