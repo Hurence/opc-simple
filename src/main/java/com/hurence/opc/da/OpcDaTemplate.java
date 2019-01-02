@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ import com.hurence.opc.auth.NtlmCredentials;
 import com.hurence.opc.exception.OpcException;
 import com.hurence.opc.util.ExecutorServiceFactory;
 import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
+import io.reactivex.Completable;
+import io.reactivex.subjects.CompletableSubject;
 import org.jinterop.dcom.common.JIException;
 import org.jinterop.dcom.common.JISystem;
 import org.jinterop.dcom.core.*;
@@ -88,7 +90,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
      * Reconnects as well in case the autoreconnect has been set to true
      */
     private synchronized void checkAlive() {
-        ConnectionState connectionState = getConnectionState();
+        ConnectionState connectionState = getConnectionState().blockingFirst();
         if (opcServer != null && (connectionState == ConnectionState.CONNECTING || connectionState == ConnectionState.CONNECTED)) {
             boolean inError = false;
             try {
@@ -112,9 +114,13 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         }
     }
 
-
     @Override
-    public void connect(OpcDaConnectionProfile connectionProfile) {
+    public Completable connect(OpcDaConnectionProfile connectionProfile) {
+        return CompletableSubject.fromAction(() -> doConnect(connectionProfile))
+                .andThen(waitUntilConnected());
+    }
+
+    public void doConnect(OpcDaConnectionProfile connectionProfile) {
         if (connectionProfile == null || connectionProfile.getConnectionUri() == null) {
             throw new OpcException("Please provide any valid non null connection profile");
         }
@@ -131,7 +137,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         String domain = ((NtlmCredentials) credentials).getDomain();
 
 
-        ConnectionState cs = getConnectionState();
+        ConnectionState cs = getConnectionState().blockingFirst();
         if (cs != ConnectionState.DISCONNECTED) {
             throw new OpcException("There is already an active connection. Please disconnect first");
         }
@@ -174,7 +180,12 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     }
 
     @Override
-    public synchronized void disconnect() {
+    public Completable disconnect() {
+        return CompletableSubject.fromAction(() -> doDisconnect())
+                .andThen(waitUntilDisconnected());
+    }
+
+    public synchronized void doDisconnect() {
         try {
             getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
             if (scheduler != null) {
@@ -250,7 +261,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
     @Override
     public Collection<OpcTagInfo> fetchMetadata(String... tagIds) {
-        if (getConnectionState() != ConnectionState.CONNECTED) {
+        if (getConnectionState().blockingFirst() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to fetch metadata. Not connected!");
         }
         return Arrays.stream(tagIds).map(s -> {
@@ -311,7 +322,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
     @Override
     public Collection<OpcObjectInfo> fetchNextTreeLevel(String rootTagId) {
-        if (getConnectionState() != ConnectionState.CONNECTED) {
+        if (getConnectionState().blockingFirst() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to fetch tags. Not connected!");
         }
         synchronized (opcServer) {
@@ -333,7 +344,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
     @Override
     public Collection<OpcTagInfo> browseTags() {
-        if (getConnectionState() != ConnectionState.CONNECTED) {
+        if (getConnectionState().blockingFirst() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to browse tags. Not connected!");
         }
         synchronized (opcServer) {
@@ -354,7 +365,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
     @Override
     public OpcDaSession createSession(OpcDaSessionProfile sessionProfile) {
-        if (getConnectionState() != ConnectionState.CONNECTED) {
+        if (getConnectionState().blockingFirst() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to create a session. Not connected!");
         }
         OpcDaSession ret = OpcDaSession.create(opcServer, sessionProfile, this);
@@ -365,7 +376,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
     @Override
     public void releaseSession(OpcDaSession session) {
-        if (getConnectionState() == ConnectionState.CONNECTED && session != null) {
+        if (getConnectionState().blockingFirst() == ConnectionState.CONNECTED && session != null) {
             sessions.remove(session);
             session.cleanup(opcServer);
         }

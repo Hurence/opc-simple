@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,6 +17,9 @@
 
 package com.hurence.opc;
 
+import io.reactivex.Completable;
+import io.reactivex.Observable;
+
 import java.util.Collection;
 
 /**
@@ -33,12 +36,12 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
      *
      * @param connectionProfile the connection information
      */
-    void connect(T connectionProfile);
+    Completable connect(T connectionProfile);
 
     /**
      * Disconnects from the OPC server.
      */
-    void disconnect();
+    Completable disconnect();
 
 
     /**
@@ -49,11 +52,11 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
     boolean isChannelSecured();
 
     /**
-     * Retrieves the state of the current connection.
+     * Retrieves observable connected to the state of the current connection.
      *
-     * @return the {@link ConnectionState}
+     * @return the {@link ConnectionState} as an {@link Observable}
      */
-    ConnectionState getConnectionState();
+    Observable<ConnectionState> getConnectionState();
 
     /**
      * Retrieves the list of tags.
@@ -99,21 +102,6 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
      */
     void releaseSession(V session);
 
-
-    /**
-     * Wait until the connection has been established.
-     *
-     * @return true if the connect operation was successful.
-     */
-    boolean awaitConnected();
-
-
-    /**
-     * Wait until the connection has been disconnected.
-     *
-     * @return true if the disconnect operation was successful.
-     */
-    boolean awaitDisconnected();
 
 
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
-import com.hurence.opc.util.AutoReconnectOpcOperations;
+import io.reactivex.Single;
 import org.eclipse.milo.opcua.stack.core.util.SelfSignedCertificateGenerator;
 import org.junit.*;
 import org.slf4j.Logger;
@@ -108,8 +108,7 @@ public class OpcUaTemplateTest {
                     .withCredentials(new UsernamePasswordCredentials()
                             .withUser("user")
                             .withPassword("password1"))
-            );
-            Assert.assertTrue(opcUaTemplate.awaitConnected());
+            ).blockingAwait();
         }
     }
 
@@ -117,8 +116,8 @@ public class OpcUaTemplateTest {
     public void connectionAnonymousSuccessTest() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createConnectionProfile()
-                    .withCredentials(Credentials.ANONYMOUS_CREDENTIALS));
-            Assert.assertTrue(opcUaTemplate.awaitConnected());
+                    .withCredentials(Credentials.ANONYMOUS_CREDENTIALS))
+                    .blockingAwait();
             Assert.assertFalse(opcUaTemplate.isChannelSecured());
         }
     }
@@ -129,8 +128,8 @@ public class OpcUaTemplateTest {
             OpcUaConnectionProfile connectionProfile = createConnectionProfile();
             opcUaTemplate.connect(connectionProfile
                     .withCredentials(Credentials.ANONYMOUS_CREDENTIALS)
-                    .withSecureChannelEncryption(createX509Credentials(connectionProfile.getClientIdUri())));
-            Assert.assertTrue(opcUaTemplate.awaitConnected());
+                    .withSecureChannelEncryption(createX509Credentials(connectionProfile.getClientIdUri())))
+                    .blockingAwait();
             Assert.assertTrue(opcUaTemplate.isChannelSecured());
 
         }
@@ -144,7 +143,7 @@ public class OpcUaTemplateTest {
                     .withCredentials(new UsernamePasswordCredentials()
                             .withUser("user")
                             .withPassword("badpassword"))
-            );
+            ).blockingAwait();
         }
     }
 
@@ -153,16 +152,19 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             OpcUaConnectionProfile connectionProfile = createConnectionProfile();
             opcUaTemplate.connect(connectionProfile
-                    .withCredentials(createX509Credentials(connectionProfile.getClientIdUri())));
-            Assert.assertTrue(opcUaTemplate.awaitConnected());
+                    .withCredentials(createX509Credentials(connectionProfile.getClientIdUri())))
+                    .blockingAwait();
         }
     }
 
     @Test
     public void testBrowse() throws Exception {
+
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile());
-            Collection<OpcTagInfo> ret = opcUaTemplate.browseTags();
+            Collection<OpcTagInfo> ret =
+                    opcUaTemplate.connect(createConnectionProfile())
+                            .andThen(Single.fromCallable(() -> opcUaTemplate.browseTags()))
+                            .blockingGet();
             ObjectMapper mapper = new ObjectMapper();
             mapper.findAndRegisterModules();
             logger.info("{}", mapper.writeValueAsString(ret));
@@ -178,8 +180,12 @@ public class OpcUaTemplateTest {
     @Test
     public void testFetchMetadata() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile());
-            Collection<OpcTagInfo> ret = opcUaTemplate.fetchMetadata("ns=2;s=sint");
+
+            Collection<OpcTagInfo> ret =
+                    opcUaTemplate.connect(createConnectionProfile())
+                            .andThen(Single.fromCallable(() -> opcUaTemplate.fetchMetadata("ns=2;s=sint")))
+                            .blockingGet();
+
             logger.info("Metadata: {}", ret);
             Assert.assertEquals(1, ret.size());
 
@@ -189,7 +195,7 @@ public class OpcUaTemplateTest {
     @Test
     public void testRead() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile());
+            opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
             );
             logger.info("Read tag {}", session.read("ns=2;s=sint"));
@@ -199,7 +205,7 @@ public class OpcUaTemplateTest {
     @Test
     public void testWrite() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile());
+            opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
             );
             List<OperationStatus> result = session.write(
@@ -217,7 +223,7 @@ public class OpcUaTemplateTest {
     @Test
     public void testStream() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile());
+            opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withDefaultPublicationInterval(Duration.ofMillis(100))
             )) {
@@ -235,7 +241,7 @@ public class OpcUaTemplateTest {
     @Test
     public void testfetchNextTreeLevel() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile());
+            opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
             Assert.assertEquals(3, opcUaTemplate.fetchNextTreeLevel("ns=0;i=84").size());
             Assert.assertTrue(opcUaTemplate.fetchNextTreeLevel("ns=2;s=sint").isEmpty());
         }
@@ -246,7 +252,7 @@ public class OpcUaTemplateTest {
     @Ignore
     public void testStreamFromProsys() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createProsysConnectionProfile());
+            opcUaTemplate.connect(createProsysConnectionProfile()).blockingAwait();
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withDefaultPublicationInterval(Duration.ofMillis(1000)))) {
                 final List<OpcData<Double>> values = new ArrayList<>();
@@ -268,6 +274,7 @@ public class OpcUaTemplateTest {
     @Test
     @Ignore
     public void testStreamAutoreconnectFromProsys() throws Exception {
+        /*
         try (OpcUaOperations opcUaTemplate = AutoReconnectOpcOperations.create(new OpcUaTemplate())) {
             opcUaTemplate.connect(createProsysConnectionProfile());
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
@@ -290,13 +297,14 @@ public class OpcUaTemplateTest {
                         .limit(100).forEach(System.err::println);
             }
         }
+        */
     }
 
     @Ignore
     @Test
     public void testReadFromProsys() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createProsysConnectionProfile());
+            opcUaTemplate.connect(createProsysConnectionProfile()).blockingAwait();
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
             );
             logger.info("Read tag {}", session.read("ns=5;s=Sawtooth1"));

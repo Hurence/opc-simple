@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
 import com.hurence.opc.util.ExecutorServiceFactory;
 import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
+import io.reactivex.Completable;
+import io.reactivex.subjects.CompletableSubject;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
 import org.eclipse.milo.opcua.sdk.client.api.config.OpcUaClientConfig;
@@ -125,7 +127,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
      * Reconnects as well in case the autoreconnect has been set to true
      */
     private synchronized void checkAlive() {
-        ConnectionState connectionState = getConnectionState();
+        ConnectionState connectionState = getConnectionState().blockingFirst();
         if (client != null && (connectionState == ConnectionState.CONNECTING || connectionState == ConnectionState.CONNECTED)) {
             boolean inError = false;
             try {
@@ -265,7 +267,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
     @Override
     public boolean isChannelSecured() {
-        if (client == null || !getConnectionState().equals(ConnectionState.CONNECTED)) {
+        if (client == null || !getConnectionState().blockingFirst().equals(ConnectionState.CONNECTED)) {
             throw new OpcException("Cannot state security on non established link. Please connect first");
         }
         if (client.getStackClient().getEndpoint().isPresent()) {
@@ -276,13 +278,21 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
     }
 
     @Override
-    public void connect(OpcUaConnectionProfile connectionProfile) {
+    public Completable connect(OpcUaConnectionProfile connectionProfile) {
+
+        return CompletableSubject
+                .fromAction(() -> doConnect(connectionProfile))
+                .andThen(waitUntilConnected());
+    }
+
+    public void doConnect(OpcUaConnectionProfile connectionProfile) {
+
         if (connectionProfile == null || connectionProfile.getCredentials() == null ||
                 connectionProfile.getConnectionUri() == null) {
             throw new OpcException("Please provide any valid non null connection profile with valid credentials");
         }
 
-        ConnectionState cs = getConnectionState();
+        ConnectionState cs = getConnectionState().blockingFirst();
         if (cs != ConnectionState.DISCONNECTED) {
             throw new OpcException("There is already an active connection. Please disconnect first");
         }
@@ -298,7 +308,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             getStateAndSet(Optional.of(ConnectionState.CONNECTED));
         } catch (Exception e) {
             try {
-                disconnect();
+                disconnect().blockingAwait(connectionProfile.getSocketTimeout().toMillis(), TimeUnit.MILLISECONDS);
             } finally {
                 throw new OpcException("Unexpected exception occurred while connecting", e);
             }
@@ -306,7 +316,13 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
     }
 
     @Override
-    public void disconnect() {
+    public Completable disconnect() {
+        return CompletableSubject.fromAction(() -> doDisconnect())
+                .andThen(waitUntilDisconnected());
+    }
+
+    public void doDisconnect() {
+        getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
         try {
             //cleanup here
             while (!sessions.isEmpty()) {
@@ -320,7 +336,6 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
                     logger.warn("Unable to properly close a session", e);
                 }
             }
-            getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
             if (scheduler != null) {
                 scheduler.shutdown();
             }
@@ -545,7 +560,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
     @Override
     public void releaseSession(OpcUaSession session) {
-        if (getConnectionState() == ConnectionState.CONNECTED && session != null) {
+        if (getConnectionState().blockingFirst() == ConnectionState.CONNECTED && session != null) {
             sessions.remove(session);
             session.cleanup();
         }
