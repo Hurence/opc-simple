@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,35 +20,27 @@ package com.hurence.opc.ua;
 import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcSession;
 import com.hurence.opc.OperationStatus;
-import com.hurence.opc.SubscriptionConfiguration;
 import com.hurence.opc.exception.OpcException;
+import io.reactivex.Flowable;
+import io.reactivex.Single;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
 import org.eclipse.milo.opcua.sdk.client.api.subscriptions.UaMonitoredItem;
 import org.eclipse.milo.opcua.sdk.client.api.subscriptions.UaSubscription;
-import org.eclipse.milo.opcua.stack.core.AttributeId;
 import org.eclipse.milo.opcua.stack.core.StatusCodes;
 import org.eclipse.milo.opcua.stack.core.types.builtin.*;
-import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.MonitoringMode;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
-import org.eclipse.milo.opcua.stack.core.types.structured.MonitoredItemCreateRequest;
-import org.eclipse.milo.opcua.stack.core.types.structured.MonitoringParameters;
-import org.eclipse.milo.opcua.stack.core.types.structured.ReadValueId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.ref.WeakReference;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiConsumer;
-import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * The OCP-UA Session.
@@ -118,11 +110,11 @@ public class OpcUaSession implements OpcSession {
         }
     }
 
-    private OpcUaClient fetchValidClient() {
+    private Single<OpcUaClient> fetchValidClient() {
         if (client.get() == null) {
-            throw new OpcException("Unable to read items. OPC-UA Client has been garbage collected. Please use a fresher instance");
+            return Single.error(new OpcException("Unable to read items. OPC-UA Client has been garbage collected. Please use a fresher instance"));
         }
-        return client.get();
+        return Single.just(client.get());
     }
 
 
@@ -154,58 +146,54 @@ public class OpcUaSession implements OpcSession {
 
 
     @Override
-    public List<OpcData> read(String... tags) {
-        OpcUaClient c = fetchValidClient();
-        try {
-            return c.readValues(0.0, TimestampsToReturn.Both, Arrays.stream(tags).map(NodeId::parseSafe)
-                    .map(Optional::get).collect(Collectors.toList()))
-                    .thenApply(dataValues -> {
-                        if (dataValues.size() != tags.length) {
-                            throw new OpcException("Input tags does not match received tags. Aborting");
-                        }
-                        List<OpcData> ret = new ArrayList<>();
-                        for (int i = 0; i < dataValues.size(); i++) {
-                            try {
-                                ret.add(opcData(tags[i], dataValues.get(i)));
+    public Single<List<OpcData>> read(String... tags) {
+        return fetchValidClient()
+                .flatMap(c -> Single.fromFuture(
+                        c.readValues(0.0, TimestampsToReturn.Both, Arrays.stream(tags).map(NodeId::parseSafe)
+                                .map(Optional::get).collect(Collectors.toList()))
+                                .thenApply(dataValues -> {
+                                    if (dataValues.size() != tags.length) {
+                                        throw new OpcException("Input tags does not match received tags. Aborting");
+                                    }
+                                    List<OpcData> ret = new ArrayList<>();
+                                    for (int i = 0; i < dataValues.size(); i++) {
+                                        try {
+                                            ret.add(opcData(tags[i], dataValues.get(i)));
 
-                            } catch (Exception e) {
-                                logger.warn("Unable to properly map tag " + tags[i] + ". Skipping!", e);
-                            }
-                        }
-                        return ret;
-                    }).get();
-        } catch (Exception e) {
-            throw new OpcException("Unable to successfully read tags", e);
-        }
+                                        } catch (Exception e) {
+                                            logger.warn("Unable to properly map tag " + tags[i] + ". Skipping!", e);
+                                        }
+                                    }
+                                    return ret;
+                                })));
     }
 
 
     @Override
-    public List<OperationStatus> write(OpcData... data) {
-        try {
-            return fetchValidClient().writeValues(
-                    Arrays.stream(data)
-                            .map(OpcData::getTag)
-                            .map(NodeId::parse)
-                            .collect(Collectors.toList()),
-                    Arrays.stream(data)
-                            .map(OpcData::getValue)
-                            .map(Variant::new)
-                            .map(DataValue::valueOnly)
-                            .collect(Collectors.toList())
-            ).thenApply(statusCodes -> statusCodes.stream()
-                    .map(OpcUaQualityExtractor::operationStatus)
-                    .collect(Collectors.toList())
-            ).get();
-        } catch (Exception e) {
-            throw new OpcException("Unable to successfully read tags", e);
-        }
+    public Single<List<OperationStatus>> write(OpcData... data) {
+        return fetchValidClient()
+                .flatMap(c -> Single.fromFuture(c.writeValues(
+                        Arrays.stream(data)
+                                .map(OpcData::getTag)
+                                .map(NodeId::parse)
+                                .collect(Collectors.toList()),
+                        Arrays.stream(data)
+                                .map(OpcData::getValue)
+                                .map(Variant::new)
+                                .map(DataValue::valueOnly)
+                                .collect(Collectors.toList())
+                ).thenApply(statusCodes -> statusCodes.stream()
+                        .map(OpcUaQualityExtractor::operationStatus)
+                        .collect(Collectors.toList()))));
+
 
     }
 
     @Override
-    public Stream<OpcData> stream(SubscriptionConfiguration subscriptionConfiguration, String... tags) {
+    public Flowable<OpcData> stream(String tagId, Duration duration) {
+        /*
         BlockingQueue<OpcData> transferQueue = new SynchronousQueue<>();
+
         final List<UaMonitoredItem> results = new ArrayList<>();
         final Map<String, Integer> handles = Arrays.stream(tags).collect(Collectors.toMap(Function.identity(), tag -> clientHandleCounter.incrementAndGet()));
         final Map<Integer, String> reverseHandles = handles.entrySet().stream().collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey));
@@ -271,6 +259,8 @@ public class OpcUaSession implements OpcSession {
                 throw new OpcException("Unable to stream requested tags", e);
             }
         }
+        */
+        return Flowable.empty();
 
     }
 
