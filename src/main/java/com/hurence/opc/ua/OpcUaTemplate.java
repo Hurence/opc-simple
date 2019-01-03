@@ -280,7 +280,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
     @Override
     public Completable connect(OpcUaConnectionProfile connectionProfile) {
 
-        return CompletableSubject
+        return Completable
                 .fromAction(() -> doConnect(connectionProfile))
                 .andThen(waitUntilConnected());
     }
@@ -447,7 +447,6 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
     @Override
     public Flowable<OpcObjectInfo> fetchNextTreeLevel(String rootTagId) {
-
         return Flowable.fromFuture(client.browse(new BrowseDescription(NodeId.parse(rootTagId), BrowseDirection.Forward,
                 Identifiers.HierarchicalReferences, true,
                 UInteger.valueOf(NodeClass.Object.getValue() | NodeClass.Variable.getValue()),

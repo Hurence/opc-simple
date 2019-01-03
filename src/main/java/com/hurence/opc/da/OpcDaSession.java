@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,8 +17,13 @@
 
 package com.hurence.opc.da;
 
-import com.hurence.opc.*;
+import com.hurence.opc.OpcData;
+import com.hurence.opc.OpcOperations;
+import com.hurence.opc.OpcSession;
+import com.hurence.opc.OperationStatus;
 import com.hurence.opc.exception.OpcException;
+import io.reactivex.Flowable;
+import io.reactivex.Single;
 import org.jinterop.dcom.common.JIException;
 import org.jinterop.dcom.core.JIVariant;
 import org.openscada.opc.dcom.common.KeyedResult;
@@ -38,12 +43,11 @@ import org.slf4j.LoggerFactory;
 import java.lang.ref.WeakReference;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 
 /**
@@ -63,6 +67,8 @@ public class OpcDaSession implements OpcSession {
     private OPCDATASOURCE datasource;
     private final WeakReference<OpcDaTemplate> creatingOperations;
     private final Map<String, Short> dataTypeMap;
+    private final Map<String, AtomicLong> refcountMap = Collections.synchronizedMap(new HashMap<>());
+    private final Flowable<OpcData> masterFlowable;
 
     private OpcDaSession(OpcDaTemplate creatingOperations, OPCGroupStateMgt group, OPCDATASOURCE datasource,
                          Map<String, Short> dataTypeMap)
@@ -73,6 +79,20 @@ public class OpcDaSession implements OpcSession {
         this.datasource = datasource;
         this.creatingOperations = new WeakReference<>(creatingOperations);
         this.dataTypeMap = dataTypeMap;
+        try {
+            long refreshRate = group.getState().getUpdateRate();
+            logger.info("Using revised session refresh rate: {} milliseconds", refreshRate);
+            //start emitting hot flowable.
+            masterFlowable = Flowable.interval(refreshRate, TimeUnit.MILLISECONDS)
+                    .takeWhile(ignored -> group != null)
+                    .flatMap(ignored ->
+                            read(refcountMap.keySet().toArray(new String[refcountMap.size()]))
+                                    .flattenAsFlowable(opcData -> opcData)
+                    ).publish().autoConnect();
+
+        } catch (JIException e) {
+            throw new OpcException("Unable to get revised refresh interval", e);
+        }
     }
 
     static OpcDaSession create(OPCServer server, OpcDaSessionProfile sessionProfile, OpcDaTemplate creatingOperations) {
@@ -110,122 +130,97 @@ public class OpcDaSession implements OpcSession {
 
 
     @Override
-    public List<OpcData> read(String... tags) {
-        if (group == null) {
-            throw new OpcException("Unable to read tags. Session has been detached!");
-        }
-        Map<String, Map.Entry<Integer, Integer>> tagsHandles =
-                Arrays.stream(tags).collect(Collectors.toMap(Function.identity(), this::resolveItemHandles));
-        Map<Integer, String> mapsToClientHandles = tagsHandles.entrySet().stream()
-                .collect(Collectors.toMap(e -> e.getValue().getValue(), e -> e.getKey()));
-        KeyedResultSet<Integer, OPCITEMSTATE> result;
-        try {
-            result = syncIO.read(datasource, tagsHandles.values().stream().map(Map.Entry::getKey).toArray(a -> new Integer[a]));
-            return result.stream()
-                    .map(KeyedResult::getValue)
-                    .filter(value -> mapsToClientHandles.containsKey(value.getClientHandle()))
-                    .map(value -> {
-                        try {
-                            return new OpcData<>(mapsToClientHandles.get(value.getClientHandle()),
-                                    value.getTimestamp().asBigDecimalCalendar().toInstant(),
-                                    OpcDaQualityExtractor.quality(value.getQuality()),
-                                    JIVariantMarshaller.toJavaType(value.getValue()),
-                                    OpcDaQualityExtractor.operationStatus(value.getQuality()));
-                        } catch (JIException e) {
-                            throw new OpcException("Unable to read tag " + value, e);
-                        }
-                    }).collect(Collectors.toList());
-
-        } catch (JIException e) {
-            throw new OpcException("Unable to read tags", e);
-        }
-    }
-
-
-    @Override
-    public List<OperationStatus> write(OpcData... data) {
-        if (group == null) {
-            throw new OpcException("Unable to write tags. Session has been detached!");
-        }
-        try {
-            ResultSet<WriteRequest> result = syncIO.write(Arrays.stream(data)
-                    .map(d -> new WriteRequest(resolveItemHandles(d.getTag()).getKey(), JIVariant.makeVariant(d.getValue())))
-                    .toArray(a -> new WriteRequest[a]));
-            return result.stream()
-                    .map(OpcDaQualityExtractor::operationStatus)
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            throw new OpcException("Unable to write data", e);
-        }
-    }
-
-
-    @Override
-    public Stream<OpcData> stream(SubscriptionConfiguration subscriptionConfiguration, String... tags) {
-        if (group == null) {
-            throw new OpcException("Unable to read tags. Session has been detached!");
-        }
-        long refreshRate;
-        try {
-            refreshRate = group.getState().getUpdateRate();
-        } catch (JIException e) {
-            throw new OpcException("Unable to get revised refresh interval", e);
-        }
-        final ScheduledExecutorService readScheduler = Executors.newSingleThreadScheduledExecutor();
-        final ScheduledExecutorService writeScheduler = Executors.newSingleThreadScheduledExecutor();
-        final AtomicBoolean inError = new AtomicBoolean();
-        final TransferQueue<OpcData> transferQueue = new LinkedTransferQueue<>();
-        final Map<String, OpcData> latestReads = Collections.synchronizedMap(new HashMap<>());
-        final Map<String, OpcData> latestWrites = Collections.synchronizedMap(new HashMap<>());
-
-        //set up opc task to read at refresh rate
-        readScheduler.scheduleWithFixedDelay(() -> {
-            try {
-                read(tags).forEach(opcData -> latestReads.compute(opcData.getTag(),
-                        (k, oldValue) -> oldValue == null || oldValue.getTimestamp().isBefore(opcData.getTimestamp()) ? opcData : oldValue));
-            } catch (Exception e) {
-                inError.set(true);
-                throw new OpcException("Error while reading tags. Stream aborted", e);
+    public Single<List<OpcData>> read(String... tags) {
+        return Single.fromCallable(() -> {
+            if (group == null) {
+                throw new OpcException("Unable to read tags. Session has been detached!");
             }
-        }, 0L, refreshRate, TimeUnit.MILLISECONDS);
-
-        //now group by streaming configuration and schedule the tag value transfer
-        Map<Duration, List<String>> streamConfigurationByTags = Arrays.stream(tags)
-                .collect(Collectors.groupingBy(subscriptionConfiguration::samplingIntervalForTag));
-        streamConfigurationByTags.forEach((period, tagList) ->
-                writeScheduler.scheduleAtFixedRate(() -> tagList.forEach(tag -> {
-                    try {
-                        OpcData lastWrite = latestWrites.get(tag);
-                        OpcData lastRead = latestReads.get(tag);
-                        if (lastRead != null) {
-                            if (!lastRead.equals(lastWrite)) {
-                                latestWrites.put(tag, lastRead);
-                                transferQueue.add(lastRead);
+            Map<String, Map.Entry<Integer, Integer>> tagsHandles =
+                    Arrays.stream(tags).collect(Collectors.toMap(Function.identity(), this::resolveItemHandles));
+            Map<Integer, String> mapsToClientHandles = tagsHandles.entrySet().stream()
+                    .collect(Collectors.toMap(e -> e.getValue().getValue(), e -> e.getKey()));
+            KeyedResultSet<Integer, OPCITEMSTATE> result;
+            try {
+                result = syncIO.read(datasource, tagsHandles.values().stream().map(Map.Entry::getKey).toArray(a -> new Integer[a]));
+                return result.stream()
+                        .map(KeyedResult::getValue)
+                        .filter(value -> mapsToClientHandles.containsKey(value.getClientHandle()))
+                        .map(value -> {
+                            try {
+                                return new OpcData<>(mapsToClientHandles.get(value.getClientHandle()),
+                                        value.getTimestamp().asBigDecimalCalendar().toInstant(),
+                                        OpcDaQualityExtractor.quality(value.getQuality()),
+                                        JIVariantMarshaller.toJavaType(value.getValue()),
+                                        OpcDaQualityExtractor.operationStatus(value.getQuality()));
+                            } catch (JIException e) {
+                                throw new OpcException("Unable to read tag " + value, e);
                             }
-                        }
-                    } catch (Exception e) {
-                        inError.set(true);
-                        throw new OpcException("Unable to buffer data", e);
-                    }
+                        }).collect(Collectors.toList());
 
-                }), 0L, period.toNanos(), TimeUnit.NANOSECONDS));
-        final long minPollingTime = streamConfigurationByTags.keySet().stream()
-                .mapToLong(Duration::toNanos).min().getAsLong();
-        return Stream.generate(() -> {
-            if (inError.get()) {
-                throw new OpcException("EOF reading from the steam.");
+            } catch (JIException e) {
+                throw new OpcException("Unable to read tags", e);
+            }
+        });
+    }
+
+
+    @Override
+    public Single<List<OperationStatus>> write(OpcData... data) {
+        return Single.fromCallable(() -> {
+            if (group == null) {
+                throw new OpcException("Unable to write tags. Session has been detached!");
             }
             try {
-                return transferQueue.poll(minPollingTime, TimeUnit.NANOSECONDS);
-            } catch (InterruptedException ie) {
-                throw new OpcException("Interrupted reading from the steam.", ie);
-
+                ResultSet<WriteRequest> result = syncIO.write(Arrays.stream(data)
+                        .map(d -> new WriteRequest(resolveItemHandles(d.getTag()).getKey(), JIVariant.makeVariant(d.getValue())))
+                        .toArray(a -> new WriteRequest[a]));
+                return result.stream()
+                        .map(OpcDaQualityExtractor::operationStatus)
+                        .collect(Collectors.toList());
+            } catch (Exception e) {
+                throw new OpcException("Unable to write data", e);
             }
-        }).filter(opcData -> opcData != null)
-                .onClose(() -> {
-                    readScheduler.shutdown();
-                    writeScheduler.shutdown();
-                });
+        });
+    }
+
+
+    private void incrementRefCount(String tagId) {
+        if (refcountMap != null) {
+            refcountMap.compute(tagId, (s, atomicLong) -> {
+                if (atomicLong == null) {
+                    atomicLong = new AtomicLong();
+                }
+                atomicLong.incrementAndGet();
+                return atomicLong;
+            });
+        }
+    }
+
+    private void decrementRefCount(String tagId) {
+        if (refcountMap != null) {
+            refcountMap.compute(tagId, (s, atomicLong) -> {
+                if (atomicLong != null && atomicLong.decrementAndGet() <= 0) {
+                    atomicLong = null;
+                }
+                return atomicLong;
+            });
+        }
+    }
+
+    @Override
+    public Flowable<OpcData> stream(String tagId, Duration samplingInterval) {
+        if (masterFlowable == null) {
+            return Flowable.error(new OpcException("Unable to read tags. Session has been detached!"));
+        }
+        //validate tag
+        return Single.fromCallable(() -> resolveItemHandles(tagId))
+                .ignoreElement()
+                .andThen(masterFlowable)
+                .filter(opcData -> opcData.getTag().equals(tagId))
+                .distinctUntilChanged()
+                .sample(samplingInterval.toNanos(), TimeUnit.NANOSECONDS)
+                .doOnSubscribe(ignored -> incrementRefCount(tagId))
+                .doOnTerminate(() -> decrementRefCount(tagId));
     }
 
 

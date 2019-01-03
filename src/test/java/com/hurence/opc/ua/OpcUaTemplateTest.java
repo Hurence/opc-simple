@@ -18,11 +18,15 @@
 package com.hurence.opc.ua;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hurence.opc.*;
+import com.hurence.opc.OpcData;
+import com.hurence.opc.OpcObjectInfo;
+import com.hurence.opc.OpcTagInfo;
+import com.hurence.opc.OperationStatus;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
+import io.reactivex.flowables.ConnectableFlowable;
 import io.reactivex.subscribers.TestSubscriber;
 import org.eclipse.milo.opcua.stack.core.util.SelfSignedCertificateGenerator;
 import org.junit.*;
@@ -222,7 +226,7 @@ public class OpcUaTemplateTest {
             List<OperationStatus> result = session.write(
                     new OpcData("ns=2;s=HelloWorld/Dynamic/Double", Instant.now(), 3.1415d),
                     new OpcData("ns=2;s=sint", Instant.now(), true)
-            );
+            ).blockingGet();
             logger.info("Write result: {}", result);
             Assert.assertFalse(result.isEmpty());
             Assert.assertEquals(2, result.size());
@@ -239,8 +243,8 @@ public class OpcUaTemplateTest {
                     .withDefaultPublicationInterval(Duration.ofMillis(100))
             ).blockingGet()) {
                 final List<OpcData<Double>> values = new ArrayList<>();
-                session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
-                        "ns=2;s=sint").limit(1000).forEach(opcData -> {
+                session.stream("ns=2;s=sint", Duration.ofMillis(10))
+                        .limit(1000).blockingForEach(opcData -> {
                     System.err.println(opcData);
                     values.add(opcData);
                 });
@@ -255,14 +259,23 @@ public class OpcUaTemplateTest {
             TestSubscriber<OpcObjectInfo> subscriber1 = new TestSubscriber<>();
             TestSubscriber<OpcObjectInfo> subscriber2 = new TestSubscriber<>();
 
-            opcUaTemplate.connect(createConnectionProfile())
-                    .doOnComplete(() -> opcUaTemplate.fetchNextTreeLevel("ns=0;i=84").subscribe(subscriber1))
-                    .doOnComplete(() -> opcUaTemplate.fetchNextTreeLevel("ns=2;s=sint").subscribe(subscriber2))
-                    .blockingAwait();
-            subscriber1.assertComplete();
-            subscriber1.assertValueCount(3);
-            subscriber2.assertComplete();
-            subscriber2.assertValueCount(0);
+            ConnectableFlowable<OpcUaTemplate> cf = opcUaTemplate.connect(createConnectionProfile())
+                    .toSingle(() -> opcUaTemplate).toFlowable().publish();
+            cf.flatMap(client -> client.fetchNextTreeLevel("ns=0;i=84"))
+                    .doOnNext(item -> logger.info(item.toString()))
+                    .subscribe(subscriber1);
+
+            cf.flatMap(client -> client.fetchNextTreeLevel("ns=2;s=sint"))
+                    .subscribe(subscriber2);
+
+            cf.connect();
+
+            subscriber1.await()
+                    .assertComplete()
+                    .assertValueCount(3);
+            subscriber2.await()
+                    .assertComplete()
+                    .assertValueCount(0);
         }
     }
 
@@ -275,11 +288,11 @@ public class OpcUaTemplateTest {
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
                     .withDefaultPublicationInterval(Duration.ofMillis(1000))).blockingGet()) {
                 final List<OpcData<Double>> values = new ArrayList<>();
-                session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
-                        "ns=5;s=Sawtooth1").limit(1000).map(a -> {
+                session.stream("ns=5;s=Sawtooth1", Duration.ofMillis(10))
+                        .limit(1000).map(a -> {
                     System.out.println(a);
                     return a;
-                }).forEach(values::add);
+                }).blockingForEach(values::add);
 
                 logger.info("Stream result: {}", values);
                 values.stream().map(OpcData::getTimestamp).forEach(System.err::println);

@@ -17,9 +17,16 @@
 
 package com.hurence.opc.da;
 
-import com.hurence.opc.*;
+import com.hurence.opc.OpcData;
+import com.hurence.opc.OpcSession;
+import com.hurence.opc.OpcTagInfo;
+import com.hurence.opc.OperationStatus;
 import com.hurence.opc.auth.NtlmCredentials;
 import com.hurence.opc.exception.OpcException;
+import io.reactivex.Flowable;
+import io.reactivex.schedulers.Schedulers;
+import io.reactivex.schedulers.Timed;
+import io.reactivex.subscribers.TestSubscriber;
 import org.jinterop.dcom.core.JIVariant;
 import org.junit.*;
 import org.slf4j.Logger;
@@ -29,8 +36,10 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.Collection;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 /**
  * E2E test. You can run by spawning an OPC-DA test server and changing connection parameters to target it.
@@ -90,22 +99,22 @@ public class OpcDaTemplateTest {
 
 
     @Test
-    public void testSampling() throws Exception {
+    public void testSampling_Subscribe() throws Exception {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
                 .withRefreshInterval(Duration.ofMillis(300));
 
         try (OpcSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
-            List<Instant> received = session.stream(
-                    new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10))
-                            .withTagSamplingIntervalForTag("Square Waves.Real8", Duration.ofSeconds(1)),
-                    "Square Waves.Real8")
+
+            List<Instant> received = session
+                    .stream("Square Waves.Real8", Duration.ofMillis(10))
+                    .sample(1, TimeUnit.SECONDS)
                     .limit(5)
                     .map(a -> {
                         Instant now = Instant.now();
                         System.out.println(a);
                         return now;
-                    }).collect(Collectors.toList());
+                    }).toList().blockingGet();
 
             for (int i = 1; i < received.size(); i++) {
                 Assert.assertTrue(received.get(i).toEpochMilli() - received.get(i - 1).toEpochMilli() >= 900);
@@ -115,37 +124,68 @@ public class OpcDaTemplateTest {
     }
 
     @Test
+    public void testSampling_Poll() throws Exception {
+        OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshInterval(Duration.ofMillis(300));
+
+        List<Timed<OpcData>> received = Flowable.combineLatest(
+                Flowable.interval(10, TimeUnit.MILLISECONDS),
+                opcDaOperations.createSession(sessionProfile).toFlowable()
+                        .flatMap(session -> session.stream("Square Waves.Real8", Duration.ofMillis(10))
+                                .doFinally(session::close)
+
+                        ), (a, b) -> b)
+                .sample(10, TimeUnit.MILLISECONDS)
+                .timeInterval()
+                .limit(100)
+                .toList().blockingGet();
+
+        received.forEach(opcDataTimed -> logger.info("Received {}", opcDataTimed));
+
+
+        for (int i = 1; i < received.size(); i++) {
+            Assert.assertTrue(received.get(i).time(TimeUnit.MILLISECONDS) - received.get(i - 1).time(TimeUnit.MILLISECONDS) < 15);
+        }
+
+        Assert.assertTrue(received.stream().map(a -> a.value().getValue())
+                .distinct().count() > 1);
+
+    }
+
+    @Test
     public void testStaticValues() throws Exception {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
                 .withRefreshInterval(Duration.ofMillis(300));
 
+        try (OpcDaSession writeSession = opcDaOperations.createSession(sessionProfile).blockingGet()) {
 
-        try (OpcSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
-            new Thread(() -> {
-                try {
-                    Thread.sleep(5000);
-                    session.write(new OpcData("Bucket Brigade.Real8", Instant.now(), new Random().nextDouble()));
+            //create a first stream to regularly write to a tag
+            Flowable<List<OperationStatus>> writer = Flowable.interval(2, TimeUnit.SECONDS)
+                    .flatMap(ignored -> writeSession.write(new OpcData("Bucket Brigade.Real8",
+                            Instant.now(), new Random().nextDouble())).toFlowable());
 
-                } catch (Exception e) {
-                    Assert.fail(e.getMessage());
-                }
-            }).start();
 
-            List<OpcData> received = session.stream(
-                    new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
-                    "Bucket Brigade.Real8")
-                    .limit(2)
-                    .map(a -> {
-                        System.out.println(a);
-                        return a;
-                    }).collect(Collectors.toList());
-
-            Assert.assertEquals(2, received.size());
-            Assert.assertFalse(Objects.equals(received.get(0).getValue(), received.get(1).getValue()));
-
+            Flowable<OpcData> flowable = opcDaOperations.createSession(sessionProfile)
+                    .toFlowable()
+                    .flatMap(session ->
+                            session.stream("Bucket Brigade.Real8", Duration.ofMillis(300))
+                                    .doFinally(session::close)
+                    )
+                    .doOnNext(opcData -> logger.info("{}", opcData))
+                    .subscribeOn(Schedulers.newThread());
+            TestSubscriber<OpcData> s1 = new TestSubscriber<>();
+            TestSubscriber<Object> s2 = new TestSubscriber<>();
+            writer.skipWhile(ignored -> !s2.hasSubscription()).limit(2).subscribe(s2);
+            flowable.limit(2).subscribe(s1);
+            s2.await();
+            s1.await()
+                    .assertComplete()
+                    .assertValueCount(2);
         }
     }
+
 
     @Test
     public void listenToTags() throws Exception {
@@ -154,81 +194,100 @@ public class OpcDaTemplateTest {
                 .withRefreshInterval(Duration.ofMillis(300));
 
         try (OpcSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
-            Assert.assertEquals(20, session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(10)),
-                    "Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+            TestSubscriber<OpcData> subscriber = new TestSubscriber<>();
+            Flowable.merge(Flowable.fromArray(new String[]{"Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString"})
+                    .map(tagId -> session.stream(tagId, Duration.ofMillis(100))))
                     .limit(20)
-                    .map(a -> {
-                        System.out.println(a);
-                        return a;
-                    }).count());
+                    .subscribeOn(Schedulers.io())
+                    .subscribe(subscriber);
 
+            subscriber
+                    .await()
+                    .assertComplete()
+                    .assertValueCount(20);
+
+
+            Assert.assertEquals(3, subscriber.values().stream().map(OpcData::getTag).distinct().count());
         }
     }
 
 
     @Test
-    public void testReadError() {
+    public void testReadError() throws Exception {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
                 .withRefreshInterval(Duration.ofMillis(300));
-        OpcDaSession session = null;
 
-        try {
-            session = opcDaOperations.createSession(sessionProfile).blockingGet();
-            OpcData<String> result = null;
+        TestSubscriber<OpcData> testSubscriber = new TestSubscriber<>();
 
-            OperationStatus lastQuality;
-            do {
-                result = session.read("Read Error.String").stream().findFirst().get();
-                System.out.println(result);
-                lastQuality = result.getOperationStatus();
-            } while (lastQuality.getLevel() == OperationStatus.Level.INFO);
-            System.out.println("Received error : " + result.getOperationStatus());
+        opcDaOperations.createSession(sessionProfile)
+                .flatMap(s ->
+                        s.read("Read Error.String")
+                                .flattenAsFlowable(a -> a)
+                                .takeUntil(data -> data.getOperationStatus().getLevel() == OperationStatus.Level.INFO)
+                                .firstOrError()
+                                .doFinally(s::close)
+                )
+                .toFlowable()
+                .doOnNext(opcData -> logger.info("Received {}", opcData))
+                .subscribe(testSubscriber);
 
-        } finally {
-            opcDaOperations.releaseSession(session);
-        }
+
+        testSubscriber.await();
+        testSubscriber.assertComplete();
+        testSubscriber.assertValueCount(1);
+
+
     }
 
 
     @Test
-    public void listenToArray() {
+    public void listenToArray() throws Exception {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
                 .withRefreshInterval(Duration.ofMillis(300));
-        OpcDaSession session = null;
 
-        try {
-            session = opcDaOperations.createSession(sessionProfile).blockingGet();
-            session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(500)),
-                    "Random.ArrayOfString")
-                    .limit(20)
-                    .map(a -> Arrays.toString((String[]) a.getValue()))
-                    .forEach(System.out::println);
+        TestSubscriber<OpcData> subscriber = new TestSubscriber<>();
 
-        } finally {
-            opcDaOperations.releaseSession(session);
-        }
+        opcDaOperations.createSession(sessionProfile)
+                .toFlowable()
+                .flatMap(session -> session.stream("Random.ArrayOfString", Duration.ofMillis(500)))
+                .limit(10)
+                .doOnNext(System.out::println)
+                .subscribe(subscriber);
+
+        subscriber.await()
+                .assertComplete()
+                .assertValueCount(10);
+
+
     }
 
+
     @Test
-    public void listenToAll() {
+    public void listenToAll() throws Exception {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
                 .withRefreshInterval(Duration.ofMillis(10));
 
-        OpcDaSession session = null;
+        TestSubscriber<OpcData> subscriber = new TestSubscriber<>();
+        try (OpcDaSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
+            List<OpcTagInfo> tagList = opcDaOperations.browseTags().toList().blockingGet();
+            Flowable.merge(Flowable.fromArray(tagList.toArray(new OpcTagInfo[tagList.size()]))
+                    .map(tagInfo -> session.stream(tagInfo.getId(), Duration.ofMillis(100)))
+            )
+                    .doOnNext(data -> logger.info("{}", data))
+                    .limit(1000)
+                    .subscribeOn(Schedulers.io())
+                    .subscribe(subscriber);
 
-        try {
-            session = opcDaOperations.createSession(sessionProfile).blockingGet();
-            session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(100)),
-                    opcDaOperations.browseTags().toList().blockingGet().stream().map(OpcTagInfo::getId).toArray(a -> new String[a]))
-                    .limit(10000)
-                    .forEach(System.out::println);
-        } finally {
-            opcDaOperations.releaseSession(session);
+
+            subscriber.await();
+            subscriber.assertComplete();
         }
+
     }
+
 
     @Test
     public void forceDataTypeTest() throws Exception {
@@ -238,7 +297,7 @@ public class OpcDaTemplateTest {
                 .withDataTypeForTag("Bucket Brigade.Int4", (short) JIVariant.VT_R8);
 
         try (OpcDaSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
-            OpcData data = session.read("Bucket Brigade.Int4").get(0);
+            OpcData data = session.read("Bucket Brigade.Int4").blockingGet().get(0);
             System.out.println(data);
             Assert.assertNotNull(data);
             Assert.assertTrue(data.getValue() instanceof Double);
@@ -254,9 +313,8 @@ public class OpcDaTemplateTest {
                 .withRefreshInterval(Duration.ofMillis(300));
 
         try (OpcSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
-            session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(500)),
-                    "I do not exist")
-                    .forEach(System.out::println);
+            session.stream("I do not exist", Duration.ofMillis(500))
+                    .blockingForEach(System.out::println);
         }
     }
 
@@ -270,7 +328,7 @@ public class OpcDaTemplateTest {
         try {
             session = opcDaOperations.createSession(sessionProfile).blockingGet();
             Collection<OperationStatus> result =
-                    session.write(new OpcData<>("Square Waves.Real8", Instant.now(), 123.31));
+                    session.write(new OpcData<>("Square Waves.Real8", Instant.now(), 123.31)).blockingGet();
             logger.info("Write result: {}", result);
             Assert.assertTrue(result
                     .stream().noneMatch(operationStatus -> operationStatus.getLevel() != OperationStatus.Level.INFO));
@@ -290,7 +348,7 @@ public class OpcDaTemplateTest {
 
         try {
             session = opcDaOperations.createSession(sessionProfile).blockingGet();
-            Collection<OperationStatus> result = session.write(new OpcData("Square Waves.Real8", Instant.now(), "I'm not a number"));
+            Collection<OperationStatus> result = session.write(new OpcData("Square Waves.Real8", Instant.now(), "I'm not a number")).blockingGet();
             logger.info("Write result: {}", result);
             Assert.assertFalse(result.stream()
                     .noneMatch(operationStatus -> operationStatus.getLevel() != OperationStatus.Level.INFO));
@@ -301,20 +359,53 @@ public class OpcDaTemplateTest {
 
     @Test
     public void testAutoReconnect() throws Exception {
-        /*
-        OpcDaOperations autoReconnectOpcOperations = AutoReconnectOpcOperations.create(opcDaOperations);
-        opcDaOperations.disconnect();
-        autoReconnectOpcOperations.connect(connectionProfile);
-        Assert.assertTrue(autoReconnectOpcOperations.awaitConnected());
-        //force disconnect
-        opcDaOperations.disconnect();
-        Assert.assertTrue(autoReconnectOpcOperations.awaitConnected());
-        opcDaOperations.disconnect();
-        Assert.assertTrue(autoReconnectOpcOperations.awaitConnected());
-        Assert.assertFalse(autoReconnectOpcOperations.browseTags().isEmpty());
-        autoReconnectOpcOperations.disconnect();
-        Assert.assertTrue(autoReconnectOpcOperations.awaitDisconnected());
-        */
+
+        final OpcDaTemplate daTemplate = new OpcDaTemplate();
+        final OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
+                .withDirectRead(false)
+                .withRefreshInterval(Duration.ofMillis(100));
+        final TestSubscriber<OpcData> subscriber = new TestSubscriber<>();
+
+
+        Flowable<OpcData> flowable = daTemplate
+                //establish a connection
+                .connect(connectionProfile)
+                //log connection errors
+                .doOnError(t -> logger.warn("Unable to connect. Retrying...: {}", t.getMessage()))
+                .andThen(daTemplate.createSession(sessionProfile))
+                //when ready create a subscription and start streaming some data
+                .toFlowable().flatMap(session ->
+                        session.stream("Saw-toothed Waves.UInt4", Duration.ofMillis(100))
+                                .subscribeOn(Schedulers.io())
+                                .doFinally(session::close))
+                //retry anything in case something failed failed
+                .doOnError(throwable -> logger.warn("An error occurred. Retrying: " + throwable.getMessage()))
+                .retryWhen(throwable -> throwable.delay(1, TimeUnit.SECONDS))
+                //do not forget to close connections
+                .doFinally(() -> daTemplate.close())
+                //create an hot flowable
+                .publish()
+                .autoConnect();
+
+        //create a deferred stream to simulate a disconnection
+        flowable
+                .limit(20)
+                .doOnComplete(() -> daTemplate.disconnect().blockingAwait())
+                //and attach it
+                .subscribe();
+
+        //attach now the real consumer
+        flowable
+                //look just for 300 values
+                .limit(50)
+                .doOnNext(data -> logger.info("Received {}", data))
+                .subscribe(subscriber);
+
+
+        subscriber.await();
+        subscriber.assertComplete();
+        subscriber.assertValueCount(50);
+
     }
 
 
