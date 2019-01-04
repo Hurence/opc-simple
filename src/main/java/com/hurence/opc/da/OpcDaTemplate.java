@@ -23,6 +23,7 @@ import com.hurence.opc.auth.NtlmCredentials;
 import com.hurence.opc.exception.OpcException;
 import com.hurence.opc.util.ExecutorServiceFactory;
 import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
+import io.reactivex.BackpressureStrategy;
 import io.reactivex.Completable;
 import io.reactivex.Flowable;
 import io.reactivex.Single;
@@ -36,7 +37,6 @@ import org.openscada.opc.dcom.common.impl.EnumString;
 import org.openscada.opc.dcom.da.*;
 import org.openscada.opc.dcom.da.impl.OPCItemProperties;
 import org.openscada.opc.dcom.da.impl.OPCServer;
-import org.reactivestreams.Subscriber;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -109,7 +109,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
             }
 
             if (inError) {
-                disconnect();
+                disconnect().blockingAwait();
             } else {
                 getStateAndSet(Optional.of(ConnectionState.CONNECTED));
             }
@@ -118,12 +118,13 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     }
 
     @Override
-    public Completable connect(OpcDaConnectionProfile connectionProfile) {
+    public Single<OpcDaOperations> connect(OpcDaConnectionProfile connectionProfile) {
         return CompletableSubject.fromAction(() -> doConnect(connectionProfile))
-                .andThen(waitUntilConnected());
+                .andThen(waitUntilConnected())
+                .andThen(Single.just(this));
     }
 
-    public void doConnect(OpcDaConnectionProfile connectionProfile) {
+    private void doConnect(OpcDaConnectionProfile connectionProfile) {
         if (connectionProfile == null || connectionProfile.getConnectionUri() == null) {
             throw new OpcException("Please provide any valid non null connection profile");
         }
@@ -174,7 +175,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
             scheduler.scheduleWithFixedDelay(this::checkAlive, 0, connectionProfile.getKeepAliveInterval().toNanos(), TimeUnit.NANOSECONDS);
         } catch (Exception e) {
             try {
-                disconnect();
+                disconnect().blockingAwait();
             } finally {
                 throw new OpcException("Unexpected exception occurred while connecting", e);
             }
@@ -188,7 +189,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
                 .andThen(waitUntilDisconnected());
     }
 
-    public synchronized void doDisconnect() {
+    private synchronized void doDisconnect() {
         logger.info("Disconnecting now");
         try {
             getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
@@ -268,7 +269,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         if (getConnectionState().blockingFirst() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to fetch metadata. Not connected!");
         }
-        return Flowable.fromPublisher(sub -> {
+        return Flowable.create(emitter -> {
             for (String s : tagIds) {
                 try {
                     Map<Integer, PropertyDescription> properties = opcItemProperties.queryAvailableProperties(s)
@@ -306,15 +307,15 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
                         ret.withReadAccessRights((accessRightsBits & OpcDaItemProperties.OPC_ACCESS_RIGHTS_READABLE) != 0);
 
                     }
-                    sub.onNext(ret);
+                    emitter.onNext(ret);
 
                 } catch (JIException e) {
-                    sub.onError(new OpcException("Unable to fetch metadata for tag " + s, e));
+                    emitter.onError(new OpcException("Unable to fetch metadata for tag " + s, e));
                 }
             }
-            sub.onComplete();
+            emitter.onComplete();
 
-        });
+        }, BackpressureStrategy.MISSING);
     }
 
 
@@ -333,7 +334,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     }
 
 
-    public Collection<OpcObjectInfo> doFetchNextTreeLevel(String rootTagId) {
+    private Collection<OpcObjectInfo> doFetchNextTreeLevel(String rootTagId) {
         if (getConnectionState().blockingFirst() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to fetch tags. Not connected!");
         }
@@ -358,25 +359,24 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         if (getConnectionState().blockingFirst() != ConnectionState.CONNECTED) {
             return Flowable.error(new OpcException("Unable to browse tags. Not connected!"));
         }
-        return Single.<Collection<String>>fromPublisher(sub -> doListAllTags(sub))
-                .flatMapPublisher(tags -> fetchMetadata(tags.toArray(new String[tags.size()])));
+        return Flowable.fromCallable(this::doListAllTags)
+                .flatMap(tags -> fetchMetadata(tags.toArray(new String[tags.size()])));
     }
 
 
-    private void doListAllTags(Subscriber<? super Collection<String>> subscriber) {
-
+    private Collection<String> doListAllTags() {
         synchronized (opcServer) {
             try {
                 opcServer.getBrowser().changePosition(null, OPCBROWSEDIRECTION.OPC_BROWSE_TO);
                 EnumString res = opcServer.getBrowser().browse(OPCBROWSETYPE.OPC_FLAT, "", 0, JIVariant.VT_EMPTY);
                 if (res != null) {
-                    subscriber.onNext(res.asCollection());
+                    return res.asCollection();
                 }
             } catch (Exception e) {
-                subscriber.onError(new OpcException("Unable to browse tags", e));
+                throw new OpcException("Unable to browse tags", e);
             }
         }
-        subscriber.onComplete();
+        return Collections.emptyList();
     }
 
     @Override
@@ -407,6 +407,9 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
     @Override
     public void close() throws Exception {
-        disconnect().blockingAwait();
+        disconnect()
+                .doOnError(throwable -> logger.warn("Unexpected error while closing DA client", throwable))
+                .onErrorComplete()
+                .blockingAwait();
     }
 }

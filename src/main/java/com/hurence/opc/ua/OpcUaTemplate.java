@@ -24,9 +24,7 @@ import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
 import com.hurence.opc.util.ExecutorServiceFactory;
 import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
-import io.reactivex.Completable;
-import io.reactivex.Flowable;
-import io.reactivex.Single;
+import io.reactivex.*;
 import io.reactivex.subjects.CompletableSubject;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
@@ -39,8 +37,6 @@ import org.eclipse.milo.opcua.sdk.client.api.identity.X509IdentityProvider;
 import org.eclipse.milo.opcua.sdk.client.api.nodes.Node;
 import org.eclipse.milo.opcua.sdk.client.api.nodes.VariableNode;
 import org.eclipse.milo.opcua.sdk.client.api.nodes.VariableTypeNode;
-import org.eclipse.milo.opcua.sdk.client.model.nodes.objects.ServerNode;
-import org.eclipse.milo.opcua.sdk.client.model.nodes.variables.ServerStatusNode;
 import org.eclipse.milo.opcua.sdk.client.nodes.UaVariableNode;
 import org.eclipse.milo.opcua.sdk.core.AccessLevel;
 import org.eclipse.milo.opcua.stack.client.UaTcpStackClient;
@@ -48,18 +44,16 @@ import org.eclipse.milo.opcua.stack.core.AttributeId;
 import org.eclipse.milo.opcua.stack.core.Identifiers;
 import org.eclipse.milo.opcua.stack.core.UaException;
 import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
+import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
 import org.eclipse.milo.opcua.stack.core.types.builtin.LocalizedText;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.BrowseDirection;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.BrowseResultMask;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.ServerState;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.*;
 import org.eclipse.milo.opcua.stack.core.types.structured.BrowseDescription;
+import org.eclipse.milo.opcua.stack.core.types.structured.BrowseResult;
 import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
 import org.eclipse.milo.opcua.stack.core.util.CertificateUtil;
 import org.eclipse.milo.opcua.stack.core.util.CryptoRestrictions;
-import org.reactivestreams.Subscriber;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -124,7 +118,6 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
     /**
      * Check if the underlying connection to the com server is still alive.
-     * Reconnects as well in case the autoreconnect has been set to true
      */
     private synchronized void checkAlive() {
         ConnectionState connectionState = getConnectionState().blockingFirst();
@@ -132,13 +125,15 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             boolean inError = false;
             try {
                 // Get a typed reference to the Server object: ServerNode
-                ServerState serverState = client.getAddressSpace().
-                        getObjectNode(Identifiers.Server, ServerNode.class)
-                        .thenCompose(ServerNode::getServerStatusNode)
-                        .thenCompose(ServerStatusNode::getState)
-                        .get();
+                final DataValue serverState = client.readValue(0.0,
+                        TimestampsToReturn.Neither, Identifiers.Server_ServerStatus_State)
+                        .get(client.getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
 
-                if (serverState == null || !ServerState.Running.equals(serverState)) {
+                if (serverState == null ||
+                        !serverState.getStatusCode().isGood() ||
+                        serverState.getValue() == null ||
+                        serverState.getValue().isNull() ||
+                        !serverState.getValue().getValue().equals(ServerState.Running.getValue())) {
                     logger.warn("Server is no more running but rather is in state {}", serverState);
                     inError = true;
                 }
@@ -148,7 +143,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             }
 
             if (inError) {
-                disconnect();
+                disconnect().blockingAwait();
             } else {
                 getStateAndSet(Optional.of(ConnectionState.CONNECTED));
             }
@@ -278,11 +273,12 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
     }
 
     @Override
-    public Completable connect(OpcUaConnectionProfile connectionProfile) {
+    public Single<OpcUaOperations> connect(OpcUaConnectionProfile connectionProfile) {
 
         return Completable
                 .fromAction(() -> doConnect(connectionProfile))
-                .andThen(waitUntilConnected());
+                .andThen(waitUntilConnected())
+                .andThen(Single.just(this));
     }
 
     public void doConnect(OpcUaConnectionProfile connectionProfile) {
@@ -323,7 +319,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
     public void doDisconnect() {
         logger.info("Disconnecting now");
-        ConnectionState currentState = getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
+        getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
         try {
             //cleanup here
             while (!sessions.isEmpty()) {
@@ -338,17 +334,22 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
                 }
             }
             if (scheduler != null) {
-                scheduler.shutdown();
+                scheduler.shutdownNow();
             }
             if (client != null) {
                 client.getSubscriptionManager().clearSubscriptions();
-                if (currentState == ConnectionState.CONNECTED) {
-                    client.disconnect().get(client.getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
-                }
+                client.disconnect().get(client.getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
+
 
             }
         } catch (Exception e) {
-            throw new OpcException("Unable to properly disconnect", e);
+            try {
+                client.getStackClient().disconnect().get();
+            } catch (Exception e1) {
+                logger.error("Unable to force the disconnection. Client may be in a bad shape", e1);
+            } finally {
+                throw new OpcException("Unable to properly disconnect", e);
+            }
         } finally {
             getStateAndSet(Optional.of(ConnectionState.DISCONNECTED));
             scheduler = null;
@@ -359,22 +360,22 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
     @Override
     public Flowable<OpcTagInfo> fetchMetadata(String... tagIds) {
         return Flowable.fromArray(tagIds)
-                .flatMap(t -> Flowable.<OpcTagInfo>fromPublisher(s -> {
+                .flatMap(t -> Flowable.create(emitter -> {
                     try {
                         NodeId target = NodeId.parse(t);
                         Node node = client.getAddressSpace().createNode(target).get();
 
                         if (!(node instanceof VariableNode)) {
-                            s.onError(new IllegalArgumentException("Tag " + t + " is not a Variable node"));
+                            emitter.onError(new IllegalArgumentException("Tag " + t + " is not a Variable node"));
                         }
 
                         final NodeId nodeId = node.getNodeId().get();
-                        browse(nodeId, null, s);
-                        s.onComplete();
+                        browse(nodeId, null, emitter);
+                        emitter.onComplete();
                     } catch (Exception e) {
-                        s.onError(new OpcException("Unable to fetch metadata for tag " + t, e));
+                        emitter.onError(new OpcException("Unable to fetch metadata for tag " + t, e));
                     }
-                }));
+                }, BackpressureStrategy.MISSING));
     }
 
 
@@ -388,7 +389,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
      * @param subscriber  the subject who subscribed for this data.
      * @throws Exception in case of any issue.
      */
-    private void browse(NodeId root, OpcTagInfo prevTagInfo, Subscriber<? super OpcTagInfo> subscriber) throws Exception {
+    private void browse(NodeId root, OpcTagInfo prevTagInfo, Emitter<? super OpcTagInfo> subscriber) throws Exception {
         Node n;
         try {
             n = client.getAddressSpace().createNode(root).get();
@@ -438,10 +439,23 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
         List<Node> nodes = client.getAddressSpace().browse(root).get();
         if (nodes != null && !nodes.isEmpty()) {
             for (Node child : nodes) {
-                browse(child.getNodeId().get(), currentTagInfo, subscriber);
+                try {
+                    browse(child.getNodeId().get(), currentTagInfo, subscriber);
+                } catch (Exception e) {
+                    logger.warn("Skipping node {} because of an unexpected error: {}", child, e.getMessage());
+                }
             }
         }
 
+    }
+
+    private Flowable<BrowseResult> doBrowseAll(BrowseResult previous) {
+        if (previous != null && previous.getContinuationPoint() != null && previous.getContinuationPoint().isNotNull()) {
+            return Flowable.merge(Flowable.just(previous),
+                    Flowable.fromFuture(client.browseNext(true, previous.getContinuationPoint()).toCompletableFuture())
+            ).flatMap(this::doBrowseAll);
+        }
+        return Flowable.just(previous);
     }
 
 
@@ -451,6 +465,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
                 Identifiers.HierarchicalReferences, true,
                 UInteger.valueOf(NodeClass.Object.getValue() | NodeClass.Variable.getValue()),
                 UInteger.valueOf(BrowseResultMask.All.getValue()))))
+                .flatMap(this::doBrowseAll)
                 .flatMap(browseResult -> Flowable.fromArray(browseResult.getReferences()))
                 .filter(referenceDescription -> !referenceDescription.getTypeDefinition().isLocal() ||
                         !referenceDescription.getTypeDefinition().local().get().equals(Identifiers.PropertyType))
@@ -465,14 +480,14 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
     @Override
     public Flowable<OpcTagInfo> browseTags() {
-        return Flowable.fromPublisher(s -> {
+        return Flowable.create(emitter -> {
             try {
-                browse(Identifiers.RootFolder, null, s);
-                s.onComplete();
+                browse(Identifiers.RootFolder, null, emitter);
+                emitter.onComplete();
             } catch (Exception e) {
-                s.onError(new OpcException("Unexpected exception while browsing tags", e));
+                emitter.onError(new OpcException("Unexpected exception while browsing tags", e));
             }
-        });
+        }, BackpressureStrategy.MISSING);
     }
 
     /**
@@ -551,16 +566,17 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
     @Override
     public Completable releaseSession(OpcUaSession session) {
         return Completable.fromRunnable(() -> {
-            if (getConnectionState().blockingFirst() == ConnectionState.CONNECTED && session != null) {
-                sessions.remove(session);
-                session.cleanup();
-            }
+            sessions.remove(session);
+            session.cleanup();
         });
     }
 
 
     @Override
     public void close() throws Exception {
-        disconnect().blockingAwait();
+        disconnect()
+                .doOnError(throwable -> logger.warn("Unexpected error while closing UA client", throwable))
+                .onErrorComplete()
+                .blockingAwait();
     }
 }

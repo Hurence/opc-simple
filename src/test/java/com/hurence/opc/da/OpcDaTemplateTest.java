@@ -70,7 +70,7 @@ public class OpcDaTemplateTest {
                 .withKeepAliveInterval(Duration.ofSeconds(5))
                 .withSocketTimeout(Duration.of(1, ChronoUnit.SECONDS));
 
-        opcDaOperations.connect(connectionProfile).blockingAwait();
+        opcDaOperations.connect(connectionProfile).ignoreElement().blockingAwait();
 
     }
 
@@ -372,24 +372,26 @@ public class OpcDaTemplateTest {
                 .connect(connectionProfile)
                 //log connection errors
                 .doOnError(t -> logger.warn("Unable to connect. Retrying...: {}", t.getMessage()))
-                .andThen(daTemplate.createSession(sessionProfile))
-                //when ready create a subscription and start streaming some data
-                .toFlowable().flatMap(session ->
-                        session.stream("Saw-toothed Waves.UInt4", Duration.ofMillis(100))
-                                .subscribeOn(Schedulers.io())
-                                .doFinally(session::close))
+                .toFlowable()
+                .flatMap(client -> client.createSession(sessionProfile)
+                        //when ready create a subscription and start streaming some data
+                        .toFlowable()
+                        .flatMap(session ->
+                                session.stream("Saw-toothed Waves.UInt4", Duration.ofMillis(100))
+                                        //do not forget to close connections
+                                        .doFinally(client::close)
+                        )
+                )
                 //retry anything in case something failed failed
                 .doOnError(throwable -> logger.warn("An error occurred. Retrying: " + throwable.getMessage()))
                 .retryWhen(throwable -> throwable.delay(1, TimeUnit.SECONDS))
-                //do not forget to close connections
-                .doFinally(() -> daTemplate.close())
+                .subscribeOn(Schedulers.io())
                 //create an hot flowable
                 .publish()
                 .autoConnect();
 
         //create a deferred stream to simulate a disconnection
-        flowable
-                .limit(20)
+        flowable.limit(20)
                 .doOnComplete(() -> daTemplate.disconnect().blockingAwait())
                 //and attach it
                 .subscribe();
@@ -405,6 +407,7 @@ public class OpcDaTemplateTest {
         subscriber.await();
         subscriber.assertComplete();
         subscriber.assertValueCount(50);
+        subscriber.dispose();
 
     }
 

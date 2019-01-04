@@ -21,24 +21,32 @@ import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcSession;
 import com.hurence.opc.OperationStatus;
 import com.hurence.opc.exception.OpcException;
+import io.reactivex.BackpressureStrategy;
 import io.reactivex.Flowable;
 import io.reactivex.Single;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.subjects.CompletableSubject;
+import io.reactivex.subjects.UnicastSubject;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
 import org.eclipse.milo.opcua.sdk.client.api.subscriptions.UaMonitoredItem;
 import org.eclipse.milo.opcua.sdk.client.api.subscriptions.UaSubscription;
+import org.eclipse.milo.opcua.stack.core.AttributeId;
 import org.eclipse.milo.opcua.stack.core.StatusCodes;
 import org.eclipse.milo.opcua.stack.core.types.builtin.*;
+import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.MonitoringMode;
 import org.eclipse.milo.opcua.stack.core.types.enumerated.TimestampsToReturn;
+import org.eclipse.milo.opcua.stack.core.types.structured.MonitoredItemCreateRequest;
+import org.eclipse.milo.opcua.stack.core.types.structured.MonitoringParameters;
+import org.eclipse.milo.opcua.stack.core.types.structured.ReadValueId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.ref.WeakReference;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -58,6 +66,7 @@ public class OpcUaSession implements OpcSession {
     private final WeakReference<OpcUaClient> client;
     private final WeakReference<OpcUaTemplate> creatingOperations;
     private UaSubscription subscription;
+    private final CompletableSubject terminationSignal = CompletableSubject.create();
 
 
     private OpcUaSession(OpcUaTemplate creatingOperations,
@@ -73,7 +82,7 @@ public class OpcUaSession implements OpcSession {
                                OpcUaClient client,
                                OpcUaSessionProfile sessionProfile) {
         try {
-            return new OpcUaSession(creatingOperations, client, sessionProfile.getDefaultPublicationInterval());
+            return new OpcUaSession(creatingOperations, client, sessionProfile.getPublicationInterval());
 
         } catch (Exception e) {
             throw new OpcException("Unable to create an OPC-UA session", e);
@@ -97,7 +106,8 @@ public class OpcUaSession implements OpcSession {
         try {
             if (client.get() != null) {
                 if (subscription != null) {
-                    client.get().getSubscriptionManager().deleteSubscription(subscription.getSubscriptionId()).get();
+                    client.get().getSubscriptionManager().deleteSubscription(subscription.getSubscriptionId())
+                            .get(client.get().getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
                     logger.info("Released subscription {}", subscription.getSubscriptionId());
                 }
 
@@ -107,6 +117,7 @@ public class OpcUaSession implements OpcSession {
         } finally {
             subscription = null;
             client.clear();
+            terminationSignal.onComplete();
         }
     }
 
@@ -191,91 +202,56 @@ public class OpcUaSession implements OpcSession {
 
     @Override
     public Flowable<OpcData> stream(String tagId, Duration duration) {
-        /*
-        BlockingQueue<OpcData> transferQueue = new SynchronousQueue<>();
+        logger.info("Creating monitored item for tag {}", tagId);
+        return Single.fromFuture(subscription().createMonitoredItems(TimestampsToReturn.Both,
+                Collections.singletonList(new MonitoredItemCreateRequest(
+                        new ReadValueId(NodeId.parse(tagId), AttributeId.Value.uid(), null, QualifiedName.NULL_VALUE),
+                        MonitoringMode.Reporting,
+                        new MonitoringParameters(UInteger.valueOf(clientHandleCounter.incrementAndGet()),
+                                (double) duration.toMillis(),
+                                null,
+                                UInteger.valueOf(Math.round(Math.ceil((double) publicationInterval.toNanos() /
+                                        (double) duration.toNanos())))
+                                , true)))
+        ).toCompletableFuture())
+                .map(uaMonitoredItems -> uaMonitoredItems.stream()
+                        .findFirst()
+                        .orElseThrow(() -> new OpcException("Received empty response for subscription to tag " + tagId)))
+                .toFlowable()
+                .flatMap(uaMonitoredItem -> {
+                    logger.info("Subscription for item {} with revised polling time {}",
+                            uaMonitoredItem.getReadValueId().getNodeId().toParseableString(),
+                            uaMonitoredItem.getRevisedSamplingInterval());
 
-        final List<UaMonitoredItem> results = new ArrayList<>();
-        final Map<String, Integer> handles = Arrays.stream(tags).collect(Collectors.toMap(Function.identity(), tag -> clientHandleCounter.incrementAndGet()));
-        final Map<Integer, String> reverseHandles = handles.entrySet().stream().collect(Collectors.toMap(Map.Entry::getValue, Map.Entry::getKey));
+                    UnicastSubject<OpcData> ret = UnicastSubject.create();
+                    uaMonitoredItem.setValueConsumer((uaMonitoredItem1, dataValue) ->
+                            ret.onNext(opcData(uaMonitoredItem1.getReadValueId().getNodeId().toParseableString(), dataValue)));
+                    final Disposable disposable = terminationSignal.subscribe(() ->
+                            ret.onError(new OpcException("EOF reading from the stream. Client closed unexpectedly")));
+                    return ret.toFlowable(BackpressureStrategy.MISSING)
+                            .doOnComplete(() -> {
+                                logger.info("Clearing subscription for item {}", uaMonitoredItem);
+                                removeSubscriptions(Collections.singletonList(uaMonitoredItem));
+                            }).doFinally(() -> disposable.dispose());
 
-        try {
-            //attach the consumer
-            final BiConsumer<UaMonitoredItem, DataValue> callback = (uaMonitoredItem1, dataValue) -> {
-                String tag = reverseHandles.get(uaMonitoredItem1.getClientHandle().intValue());
-                try {
-                    transferQueue.put(opcData(tag, dataValue));
-                } catch (Exception e) {
-                    logger.warn("Unable to properly map value for item " + tag, e);
-                }
-            };
-            results.addAll(subscription().createMonitoredItems(TimestampsToReturn.Both,
-                    Arrays.stream(tags).map(tag ->
-                            new MonitoredItemCreateRequest(
-                                    new ReadValueId(NodeId.parse(tag), AttributeId.Value.uid(), null, QualifiedName.NULL_VALUE),
-                                    MonitoringMode.Reporting,
-                                    new MonitoringParameters(UInteger.valueOf(handles.get(tag)),
-                                            (double) subscriptionConfiguration.samplingIntervalForTag(tag).toNanos() / 1.0e6,
-                                            null,
-                                            UInteger.valueOf(Math.round(Math.ceil((double) publicationInterval.toNanos() /
-                                                    (double) subscriptionConfiguration.samplingIntervalForTag(tag).toNanos())))
-                                            , true)
-                            )).collect(Collectors.toList()),
-                    ((uaMonitoredItem, integer) -> {
-                        logger.info("Subscription for item {} with revised polling time {}",
-                                reverseHandles.get(uaMonitoredItem.getClientHandle().intValue()),
-                                uaMonitoredItem.getRevisedSamplingInterval());
-                        uaMonitoredItem.setValueConsumer(callback);
-                    })).get());
-
-            // check for any subscription failure.
-            results.stream()
-                    .filter(uaMonitoredItem -> !uaMonitoredItem.getStatusCode().isGood())
-                    .findFirst()
-                    .ifPresent(uaMonitoredItem -> {
-                        throw new OpcException(String.format("Failure trying to monitoring item %s : %s",
-                                reverseHandles.get(uaMonitoredItem.getClientHandle().intValue()),
-                                Arrays.toString(StatusCodes.lookup(uaMonitoredItem.getStatusCode().getValue()).orElse(null))));
-                    });
-
-
-            return Stream.generate(() -> {
-                try {
-                    OpcData ret = null;
-                    while ((ret = transferQueue.poll(publicationInterval.toNanos(), TimeUnit.NANOSECONDS)) == null) {
-                        if (subscription == null) {
-                            throw new OpcException("EOF reading tags. Disconnected");
-                        }
-                    }
-                    return ret;
-                } catch (InterruptedException ie) {
-                    throw new OpcException("Stream interrupted", ie);
-                }
-            }).onClose(() -> removeSubscriptions(results));
-
-        } catch (Exception e) {
-            try {
-                removeSubscriptions(results);
-            } finally {
-                throw new OpcException("Unable to stream requested tags", e);
-            }
-        }
-        */
-        return Flowable.empty();
-
+                }).takeWhile(ignored -> !terminationSignal.hasComplete());
     }
 
+
     private void removeSubscriptions(List<UaMonitoredItem> results) {
-        try {
-            List<StatusCode> removeResult = subscription.deleteMonitoredItems(results).get();
-            for (int i = 0; i < removeResult.size(); i++) {
-                if (!removeResult.get(i).isGood()) {
-                    logger.warn("Unable to properly unsubscribe for item {}: {}",
-                            results.get(i).getReadValueId().getNodeId().toParseableString(),
-                            StatusCodes.lookup(removeResult.get(i).getValue()));
+        if (subscription != null) {
+            try {
+                List<StatusCode> removeResult = subscription.deleteMonitoredItems(results).get();
+                for (int i = 0; i < removeResult.size(); i++) {
+                    if (!removeResult.get(i).isGood()) {
+                        logger.warn("Unable to properly unsubscribe for item {}: {}",
+                                results.get(i).getReadValueId().getNodeId().toParseableString(),
+                                StatusCodes.lookup(removeResult.get(i).getValue()));
+                    }
                 }
+            } catch (Exception e) {
+                logger.error("Unable to properly removed monitored items", e);
             }
-        } catch (Exception e) {
-            logger.error("Unable to properly removed monitored items", e);
         }
     }
 
@@ -284,7 +260,7 @@ public class OpcUaSession implements OpcSession {
     public void close() throws Exception {
         if (creatingOperations.get() != null) {
             try {
-                creatingOperations.get().releaseSession(this);
+                creatingOperations.get().releaseSession(this).blockingAwait();
             } finally {
                 creatingOperations.clear();
             }

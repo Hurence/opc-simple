@@ -18,15 +18,14 @@
 package com.hurence.opc.ua;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hurence.opc.OpcData;
-import com.hurence.opc.OpcObjectInfo;
-import com.hurence.opc.OpcTagInfo;
-import com.hurence.opc.OperationStatus;
+import com.hurence.opc.*;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
+import io.reactivex.Flowable;
 import io.reactivex.flowables.ConnectableFlowable;
+import io.reactivex.schedulers.Schedulers;
 import io.reactivex.subscribers.TestSubscriber;
 import org.eclipse.milo.opcua.stack.core.util.SelfSignedCertificateGenerator;
 import org.junit.*;
@@ -43,6 +42,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 /**
  * {@link OpcUaTemplate} tests.
@@ -109,7 +109,7 @@ public class OpcUaTemplateTest {
                     .withCredentials(new UsernamePasswordCredentials()
                             .withUser("user")
                             .withPassword("password1"))
-            ).blockingAwait();
+            ).ignoreElement().blockingAwait();
         }
     }
 
@@ -118,7 +118,7 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             opcUaTemplate.connect(createConnectionProfile()
                     .withCredentials(Credentials.ANONYMOUS_CREDENTIALS))
-                    .blockingAwait();
+                    .ignoreElement().blockingAwait();
             Assert.assertFalse(opcUaTemplate.isChannelSecured());
         }
     }
@@ -130,6 +130,7 @@ public class OpcUaTemplateTest {
             opcUaTemplate.connect(connectionProfile
                     .withCredentials(Credentials.ANONYMOUS_CREDENTIALS)
                     .withSecureChannelEncryption(createX509Credentials(connectionProfile.getClientIdUri())))
+                    .ignoreElement()
                     .blockingAwait();
             Assert.assertTrue(opcUaTemplate.isChannelSecured());
 
@@ -144,7 +145,9 @@ public class OpcUaTemplateTest {
                     .withCredentials(new UsernamePasswordCredentials()
                             .withUser("user")
                             .withPassword("badpassword"))
-            ).blockingAwait();
+            )
+                    .ignoreElement()
+                    .blockingAwait();
         }
     }
 
@@ -154,21 +157,26 @@ public class OpcUaTemplateTest {
             OpcUaConnectionProfile connectionProfile = createConnectionProfile();
             opcUaTemplate.connect(connectionProfile
                     .withCredentials(createX509Credentials(connectionProfile.getClientIdUri())))
+                    .ignoreElement()
                     .blockingAwait();
         }
     }
 
     @Test
     public void testReactiveBrowse() throws Exception {
-        try (final OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            TestSubscriber<OpcTagInfo> subscriber = new TestSubscriber<>();
-            opcUaTemplate.connect(createConnectionProfile())
-                    .andThen(opcUaTemplate.browseTags())
-                    .onBackpressureBuffer(100)
-                    .subscribe(subscriber);
-            subscriber.assertComplete();
-            subscriber.assertValueCount(229);
-        }
+        final OpcUaTemplate opcUaTemplate = new OpcUaTemplate();
+        TestSubscriber<OpcTagInfo> subscriber = new TestSubscriber<>();
+        opcUaTemplate.connect(createConnectionProfile())
+                .toFlowable()
+                .flatMap(client -> client.browseTags()
+                        .doFinally(client::close))
+                .subscribe(subscriber);
+
+        subscriber.assertComplete();
+        subscriber.assertValueCount(229);
+        subscriber.dispose();
+        Assert.assertEquals(ConnectionState.DISCONNECTED, opcUaTemplate.getConnectionState().blockingFirst());
+
     }
 
     @Test
@@ -177,7 +185,8 @@ public class OpcUaTemplateTest {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
             Collection<OpcTagInfo> ret =
                     opcUaTemplate.connect(createConnectionProfile())
-                            .andThen(opcUaTemplate.browseTags())
+                            .toFlowable()
+                            .flatMap(client -> client.browseTags())
                             .toList().blockingGet();
 
             ObjectMapper mapper = new ObjectMapper();
@@ -198,7 +207,8 @@ public class OpcUaTemplateTest {
 
             Collection<OpcTagInfo> ret =
                     opcUaTemplate.connect(createConnectionProfile())
-                            .andThen(opcUaTemplate.fetchMetadata("ns=2;s=sint"))
+                            .toFlowable()
+                            .flatMap(client -> client.fetchMetadata("ns=2;s=sint"))
                             .toList().blockingGet();
 
             logger.info("Metadata: {}", ret);
@@ -210,17 +220,22 @@ public class OpcUaTemplateTest {
     @Test
     public void testRead() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
-            OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-            ).blockingGet();
-            logger.info("Read tag {}", session.read("ns=2;s=sint"));
+            opcUaTemplate.connect(createConnectionProfile())
+                    .ignoreElement()
+                    .andThen(opcUaTemplate.createSession(new OpcUaSessionProfile()))
+                    .flatMap(opcUaSession -> opcUaSession.read("ns=2;s=sint")
+                            .doFinally(opcUaSession::close))
+                    .doOnSuccess(items -> logger.info("Read tag {}", items))
+                    .blockingGet();
         }
     }
 
     @Test
     public void testWrite() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
+            opcUaTemplate.connect(createConnectionProfile())
+                    .ignoreElement()
+                    .blockingAwait();
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
             ).blockingGet();
             List<OperationStatus> result = session.write(
@@ -237,21 +252,27 @@ public class OpcUaTemplateTest {
 
     @Test
     public void testStream() throws Exception {
-        try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createConnectionProfile()).blockingAwait();
-            try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withDefaultPublicationInterval(Duration.ofMillis(100))
-            ).blockingGet()) {
-                final List<OpcData<Double>> values = new ArrayList<>();
-                session.stream("ns=2;s=sint", Duration.ofMillis(10))
-                        .limit(1000).blockingForEach(opcData -> {
-                    System.err.println(opcData);
-                    values.add(opcData);
-                });
-                logger.info("Received {} items", values.size());
-            }
-        }
+        final OpcUaTemplate opcUaTemplate = new OpcUaTemplate();
+        final TestSubscriber<OpcData> subscriber = new TestSubscriber<>();
+        opcUaTemplate.connect(createConnectionProfile())
+                .subscribeOn(Schedulers.newThread())
+                .flatMap(client -> client.createSession(new OpcUaSessionProfile()
+                        .withPublicationInterval(Duration.ofMillis(100))
+                ))
+                .toFlowable()
+                .flatMap(opcUaSession -> opcUaSession.stream("ns=2;s=sint", Duration.ofMillis(1))
+                        .doFinally(opcUaSession::close)
+                        .onBackpressureBuffer()
+                ).limit(10000)
+                .doFinally(opcUaTemplate::close)
+                .subscribe(subscriber);
+
+        subscriber
+                .await()
+                .assertComplete()
+                .assertValueCount(10000);
     }
+
 
     @Test
     public void testfetchNextTreeLevel() throws Exception {
@@ -259,8 +280,8 @@ public class OpcUaTemplateTest {
             TestSubscriber<OpcObjectInfo> subscriber1 = new TestSubscriber<>();
             TestSubscriber<OpcObjectInfo> subscriber2 = new TestSubscriber<>();
 
-            ConnectableFlowable<OpcUaTemplate> cf = opcUaTemplate.connect(createConnectionProfile())
-                    .toSingle(() -> opcUaTemplate).toFlowable().publish();
+            ConnectableFlowable<OpcUaOperations> cf = opcUaTemplate.connect(createConnectionProfile())
+                    .toFlowable().publish();
             cf.flatMap(client -> client.fetchNextTreeLevel("ns=0;i=84"))
                     .doOnNext(item -> logger.info(item.toString()))
                     .subscribe(subscriber1);
@@ -284,9 +305,9 @@ public class OpcUaTemplateTest {
     @Ignore
     public void testStreamFromProsys() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createProsysConnectionProfile()).blockingAwait();
+            opcUaTemplate.connect(createProsysConnectionProfile()).ignoreElement().blockingAwait();
             try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withDefaultPublicationInterval(Duration.ofMillis(1000))).blockingGet()) {
+                    .withPublicationInterval(Duration.ofMillis(1000))).blockingGet()) {
                 final List<OpcData<Double>> values = new ArrayList<>();
                 session.stream("ns=5;s=Sawtooth1", Duration.ofMillis(10))
                         .limit(1000).map(a -> {
@@ -304,39 +325,91 @@ public class OpcUaTemplateTest {
 
 
     @Test
-    @Ignore
-    public void testStreamAutoreconnectFromProsys() throws Exception {
-        /*
-        try (OpcUaOperations opcUaTemplate = AutoReconnectOpcOperations.create(new OpcUaTemplate())) {
-            opcUaTemplate.connect(createProsysConnectionProfile());
-            try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withDefaultPublicationInterval(Duration.ofMillis(10))
-            )) {
-                session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(100)), "ns=5;s=Sawtooth1")
-                        .limit(1000).forEach(System.err::println);
-                //disconnect here
-            } catch (OpcException e) {
-                //we have an EOF. Normal
-            }
-            Assert.assertTrue(opcUaTemplate.awaitDisconnected());
-            //connect here
-            Assert.assertTrue(opcUaTemplate.awaitConnected());
-            try (OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
-                    .withDefaultPublicationInterval(Duration.ofMillis(100))
-            )) {
+    public void testAutoReconnect() throws Exception {
 
-                session.stream(new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(100)), "ns=5;s=Sawtooth1")
-                        .limit(100).forEach(System.err::println);
-            }
+        //start a new dedicated server
+        TestOpcServer uaServer = new TestOpcServer(InetAddress.getLoopbackAddress(), null);
+        try {
+            uaServer.getInstance().startup().get();
+
+            TestSubscriber<OpcData> subscriber = new TestSubscriber<>();
+
+            //now build our stream
+            Flowable<OpcData> flowable = new OpcUaTemplate()
+                    //establish a connection
+                    .connect(new OpcUaConnectionProfile()
+                            .withConnectionUri(URI.create(uaServer.getBindEndpoint()))
+                            .withSocketTimeout(Duration.ofSeconds(3))
+                            .withKeepAliveInterval(Duration.ofSeconds(1)))
+                    //log connection errors
+                    .doOnError(t -> logger.warn("Unable to connect. Retrying...: {}", t.getMessage()))
+                    .toFlowable()
+                    .flatMap(client -> client.createSession(new OpcUaSessionProfile()
+                            .withPublicationInterval(Duration.ofMillis(100)))
+                            //when ready create a subscription and start streaming some data
+                            .toFlowable()
+                            .doOnNext(opcUaSession -> logger.info("Created new OPC UA session"))
+                            .flatMap(session ->
+                                    session.stream("ns=2;s=sint", Duration.ofMillis(100))
+                                            //do not forget to close connections
+                                            .doFinally(session::close)
+
+                            )
+                            .doFinally(client::close)
+                    )
+                    //retry anything in case something failed failed
+                    .doOnError(throwable -> logger.warn("An error occurred. Reconnecting: " + throwable.getMessage()))
+                    .retryWhen(throwable -> throwable.delay(1, TimeUnit.SECONDS))
+                    .subscribeOn(Schedulers.io())
+                    .takeWhile(ignored -> !subscriber.isTerminated())
+                    //create an hot flowable
+                    .publish()
+                    .autoConnect(2);
+
+
+            //create a deferred stream to simulate a disconnection
+            flowable.take(20)
+                    .subscribeOn(Schedulers.newThread())
+                    .doOnComplete(() ->
+                            new Thread(() -> {
+                                try {
+                                    //get server down
+                                    uaServer.close();
+                                    Thread.sleep(5000);
+                                    //now bring server back up
+                                    uaServer.getInstance().startup().get();
+                                } catch (Exception e) {
+                                    //nothing we can do here
+                                }
+
+                            }).start()
+                    )
+                    //and attach it
+                    .subscribe();
+
+            //attach now the real consumer
+            flowable
+                    //look just for 300 values
+                    .take(50)
+                    .doOnNext(data -> logger.info("Received {}", data))
+                    .subscribe(subscriber);
+
+
+            subscriber.await();
+            subscriber.assertComplete();
+            subscriber.assertValueCount(50);
+            subscriber.dispose();
+        } finally {
+            uaServer.close();
         }
-        */
+
     }
 
     @Ignore
     @Test
     public void testReadFromProsys() throws Exception {
         try (OpcUaTemplate opcUaTemplate = new OpcUaTemplate()) {
-            opcUaTemplate.connect(createProsysConnectionProfile()).blockingAwait();
+            opcUaTemplate.connect(createProsysConnectionProfile()).ignoreElement().blockingAwait();
             OpcUaSession session = opcUaTemplate.createSession(new OpcUaSessionProfile()
             ).blockingGet();
             logger.info("Read tag {}", session.read("ns=5;s=Sawtooth1"));
