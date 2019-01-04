@@ -17,7 +17,6 @@
 
 package com.hurence.opc.ua;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hurence.opc.*;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
@@ -189,9 +188,8 @@ public class OpcUaTemplateTest {
                             .flatMap(client -> client.browseTags())
                             .toList().blockingGet();
 
-            ObjectMapper mapper = new ObjectMapper();
-            mapper.findAndRegisterModules();
-            logger.info("{}", mapper.writeValueAsString(ret));
+
+            logger.info("{}", ret);
             Optional<OpcTagInfo> sint = ret.stream().filter(t -> "SinT".equals(t.getName()))
                     .findFirst();
             Assert.assertTrue(sint.isPresent());
