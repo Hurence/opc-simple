@@ -22,9 +22,11 @@ import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
-import com.hurence.opc.util.ExecutorServiceFactory;
-import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
+import com.hurence.opc.util.DefaultRxSchedulerFactory;
+import com.hurence.opc.util.SchedulerFactory;
 import io.reactivex.*;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.Disposables;
 import io.reactivex.subjects.CompletableSubject;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
@@ -57,13 +59,13 @@ import org.eclipse.milo.opcua.stack.core.util.CryptoRestrictions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nonnull;
 import java.security.KeyPair;
 import java.security.Security;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -96,24 +98,24 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
      */
     private OpcUaClient client;
     /**
-     * The scheduler service.
+     * The watcher task disposable.
      */
-    private ScheduledExecutorService scheduler;
+    private Disposable watcherTaskDisposable = Disposables.disposed();
 
     /**
-     * Construct an instance with an {@link ExecutorServiceFactory}
+     * Construct an instance with an {@link SchedulerFactory}
      *
-     * @param executorServiceFactory the executor thread factory.
+     * @param schedulerFactory the scheduler factory.
      */
-    public OpcUaTemplate(ExecutorServiceFactory executorServiceFactory) {
-        super(executorServiceFactory);
+    public OpcUaTemplate(SchedulerFactory schedulerFactory) {
+        super(schedulerFactory);
     }
 
     /**
-     * Standard constructor. Uses a single threaded worker.
+     * Standard constructor. Uses the default rxjava schedulers.
      */
     public OpcUaTemplate() {
-        this(SingleThreadedExecutorServiceFactory.instance());
+        this(DefaultRxSchedulerFactory.get());
     }
 
     /**
@@ -265,23 +267,19 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
         if (client == null || !getConnectionState().blockingFirst().equals(ConnectionState.CONNECTED)) {
             throw new OpcException("Cannot state security on non established link. Please connect first");
         }
-        if (client.getStackClient().getEndpoint().isPresent()) {
-            return !SecurityPolicy.None.equals(SecurityPolicy.fromUriSafe(
-                    client.getStackClient().getEndpoint().get().getSecurityPolicyUri()).orElse(null));
-        }
-        return false;
+        return client.getStackClient().getEndpoint().isPresent() &&
+                !SecurityPolicy.None.equals(SecurityPolicy.fromUriSafe(client.getStackClient().getEndpoint().get().getSecurityPolicyUri()).orElse(null));
     }
 
     @Override
-    public Single<OpcUaOperations> connect(OpcUaConnectionProfile connectionProfile) {
-
+    public Single<OpcUaOperations> connect(@Nonnull OpcUaConnectionProfile connectionProfile) {
         return Completable
                 .fromAction(() -> doConnect(connectionProfile))
                 .andThen(waitUntilConnected())
                 .andThen(Single.just(this));
     }
 
-    public void doConnect(OpcUaConnectionProfile connectionProfile) {
+    private void doConnect(OpcUaConnectionProfile connectionProfile) {
 
         if (connectionProfile == null || connectionProfile.getCredentials() == null ||
                 connectionProfile.getConnectionUri() == null) {
@@ -299,8 +297,9 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             client = new OpcUaClient(config);
             //block until connected
             client.connect().get(client.getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
-            scheduler = executorServiceFactory.createScheduler();
-            scheduler.scheduleWithFixedDelay(this::checkAlive, 0, connectionProfile.getKeepAliveInterval().toNanos(), TimeUnit.NANOSECONDS);
+            watcherTaskDisposable.dispose();
+            watcherTaskDisposable = schedulerFactory.forBlocking().schedulePeriodicallyDirect(
+                    this::checkAlive, 0, connectionProfile.getKeepAliveInterval().toNanos(), TimeUnit.NANOSECONDS);
             getStateAndSet(Optional.of(ConnectionState.CONNECTED));
         } catch (Exception e) {
             try {
@@ -313,11 +312,11 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
     @Override
     public Completable disconnect() {
-        return CompletableSubject.fromAction(() -> doDisconnect())
+        return CompletableSubject.fromAction(this::doDisconnect)
                 .andThen(waitUntilDisconnected());
     }
 
-    public void doDisconnect() {
+    private void doDisconnect() {
         logger.info("Disconnecting now");
         getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
         try {
@@ -333,9 +332,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
                     logger.warn("Unable to properly close a session", e);
                 }
             }
-            if (scheduler != null) {
-                scheduler.shutdownNow();
-            }
+            watcherTaskDisposable.dispose();
             if (client != null) {
                 client.getSubscriptionManager().clearSubscriptions();
                 client.disconnect().get(client.getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
@@ -352,13 +349,13 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             }
         } finally {
             getStateAndSet(Optional.of(ConnectionState.DISCONNECTED));
-            scheduler = null;
+            watcherTaskDisposable = Disposables.disposed();
             client = null;
         }
     }
 
     @Override
-    public Flowable<OpcTagInfo> fetchMetadata(String... tagIds) {
+    public Flowable<OpcTagInfo> fetchMetadata(@Nonnull String... tagIds) {
         return Flowable.fromArray(tagIds)
                 .flatMap(t -> Flowable.create(emitter -> {
                     try {
@@ -449,7 +446,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
     }
 
-    private Flowable<BrowseResult> doBrowseAll(BrowseResult previous) {
+    private Flowable<BrowseResult> doBrowseAll(@Nonnull BrowseResult previous) {
         if (previous != null && previous.getContinuationPoint() != null && previous.getContinuationPoint().isNotNull()) {
             return Flowable.merge(Flowable.just(previous),
                     Flowable.fromFuture(client.browseNext(true, previous.getContinuationPoint()).toCompletableFuture())
@@ -460,13 +457,14 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
 
     @Override
-    public Flowable<OpcObjectInfo> fetchNextTreeLevel(String rootTagId) {
+    public Flowable<OpcObjectInfo> fetchNextTreeLevel(@Nonnull String rootTagId) {
         return Flowable.fromFuture(client.browse(new BrowseDescription(NodeId.parse(rootTagId), BrowseDirection.Forward,
                 Identifiers.HierarchicalReferences, true,
                 UInteger.valueOf(NodeClass.Object.getValue() | NodeClass.Variable.getValue()),
                 UInteger.valueOf(BrowseResultMask.All.getValue()))))
                 .flatMap(this::doBrowseAll)
-                .flatMap(browseResult -> Flowable.fromArray(browseResult.getReferences()))
+                .flatMap(browseResult -> browseResult.getReferences() != null ?
+                        Flowable.fromArray(browseResult.getReferences()) : Flowable.empty())
                 .filter(referenceDescription -> !referenceDescription.getTypeDefinition().isLocal() ||
                         !referenceDescription.getTypeDefinition().local().get().equals(Identifiers.PropertyType))
                 .map(referenceDescription -> (NodeClass.Object.equals(referenceDescription.getNodeClass()) ?
@@ -558,13 +556,13 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
 
     @Override
-    public Single<OpcUaSession> createSession(OpcUaSessionProfile sessionProfile) {
+    public Single<OpcUaSession> createSession(@Nonnull OpcUaSessionProfile sessionProfile) {
         return Single.fromCallable(() -> OpcUaSession.create(this, client, sessionProfile))
                 .doOnSuccess(sessions::add);
     }
 
     @Override
-    public Completable releaseSession(OpcUaSession session) {
+    public Completable releaseSession(@Nonnull OpcUaSession session) {
         return Completable.fromRunnable(() -> {
             sessions.remove(session);
             session.cleanup();

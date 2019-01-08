@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,25 +17,31 @@
 
 package com.hurence.opc.util;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ScheduledExecutorService;
+import io.reactivex.Scheduler;
+
+import javax.annotation.Nonnull;
 
 /**
- * Factory class to allocate concurrent resources for {@link java.util.concurrent.ExecutorService} and {@link java.util.concurrent.ScheduledExecutorService}
+ * Factory class to use custom {@link Scheduler} depending on the operations to be done.
+ *
+ * @author amarziali
  */
-public interface ExecutorServiceFactory {
+public interface SchedulerFactory {
 
     /**
-     * Create an executor to run slave tasks.
+     * Scheduler to be used for slow blocking operations (e.g. IO wait).
      *
-     * @return an {@link ExecutorService} instance.
+     * @return a valid {@link Scheduler}
      */
-    ExecutorService createWorker();
+    @Nonnull
+    Scheduler forBlocking();
 
     /**
-     * Create a executor to schedule tasks.
+     * Scheduler to be used for computation (time consuming but not blocking) operations.
      *
-     * @return a {@link ScheduledExecutorService} instance.
+     * @return a valid {@link Scheduler}
      */
-    ScheduledExecutorService createScheduler();
+    @Nonnull
+    Scheduler forComputation();
+
 }

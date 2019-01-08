@@ -293,7 +293,7 @@ A quick example:
 ````java
 
     //assumes connectionProfile and sessionProfile have already been defined.
-    Flowable<OpcData> flowable = daTemplate
+   daTemplate
         //establish a connection
         .connect(connectionProfile)
         .toFlowable()
@@ -320,6 +320,64 @@ A quick example:
 
 ````
 
+### Integrate with other reactive frameworks
+
+Rx-Java uses its Scheduler and Threading models but sometimes there is the need to use another 
+already in place thread pool.
+
+When constructing an instance of OpcOperations (DA or UA) you can optionally provide a *SchedulerFactory* 
+in order to tell the library which pool to use for blocking and computation tasks.
+
+Here below you will find some examples.
+
+#### Integrate with Vert.x
+
+In order to best integrate with[Vert.x](https://vertx.io/) you should tell OPC simple to use the 
+already in-place netty event loops provided by Vert.x
+
+First of all, you need to import the rx-fied version of Vertx:
+
+```
+    <dependency>
+     <groupId>io.vertx</groupId>
+     <artifactId>vertx-rx-java2</artifactId>
+     <!-- REPLACE WITH YOUR VERTX VERSION -->
+     <version>3.6.2</version>
+    </dependency>
+```
+
+Then, let's start defining the following Scheduler factory (given as example):
+
+````java
+    public class VertxSchedulerFactory implements SchedulerFactory {    
+    
+        private final Vertx vertx;
+        /**
+         * Hidden constructor.
+         */
+        public DefaultRxSchedulerFactory(Vertx vertx) {
+            this.vertx = vertx;
+        }
+    
+       
+        @Nonnull
+        @Override
+        public Scheduler forBlocking() {
+            return io.vertx.reactivex.core.RxHelper.blockingScheduler(vertx);
+        }
+    
+        @Nonnull
+        @Override
+        public Scheduler forComputation() {
+            return io.vertx.reactivex.core.RxHelper.scheduler(vertx);
+        }
+    }
+````
+
+This scheduler will be used internally to pick and choose the right scheduler for the right operation.
+
+When you subscribe for flowables, you can as well use this scheduler factory to provide Schedulers for 
+subscribeOn and observeOn operations.
 
 ## Authors
 

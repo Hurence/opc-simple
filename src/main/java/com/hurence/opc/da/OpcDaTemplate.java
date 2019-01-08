@@ -21,12 +21,14 @@ import com.hurence.opc.*;
 import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.NtlmCredentials;
 import com.hurence.opc.exception.OpcException;
-import com.hurence.opc.util.ExecutorServiceFactory;
-import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
+import com.hurence.opc.util.DefaultRxSchedulerFactory;
+import com.hurence.opc.util.SchedulerFactory;
 import io.reactivex.BackpressureStrategy;
 import io.reactivex.Completable;
 import io.reactivex.Flowable;
 import io.reactivex.Single;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.Disposables;
 import io.reactivex.subjects.CompletableSubject;
 import org.jinterop.dcom.common.JIException;
 import org.jinterop.dcom.common.JISystem;
@@ -40,9 +42,9 @@ import org.openscada.opc.dcom.da.impl.OPCServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nonnull;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -69,23 +71,23 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     private JIComServer comServer;
     private OPCServer opcServer;
     private OPCItemProperties opcItemProperties;
-    private ScheduledExecutorService scheduler = null;
+    private Disposable watcherTaskDisposable = Disposables.disposed();
     private final Set<OpcDaSession> sessions = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
 
     /**
-     * Construct an instance with an {@link ExecutorServiceFactory}
+     * Construct an instance with an {@link SchedulerFactory}
      *
-     * @param executorServiceFactory the executor thread factory.
+     * @param schedulerFactory the executor thread factory.
      */
-    public OpcDaTemplate(ExecutorServiceFactory executorServiceFactory) {
-        super(executorServiceFactory);
+    public OpcDaTemplate(SchedulerFactory schedulerFactory) {
+        super(schedulerFactory);
     }
 
     /**
-     * Standard constructor. Uses a single threaded worker.
+     * Standard constructor. Uses the default rxjava worker.
      */
     public OpcDaTemplate() {
-        this(SingleThreadedExecutorServiceFactory.instance());
+        this(DefaultRxSchedulerFactory.get());
     }
 
     /**
@@ -118,7 +120,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     }
 
     @Override
-    public Single<OpcDaOperations> connect(OpcDaConnectionProfile connectionProfile) {
+    public Single<OpcDaOperations> connect(@Nonnull OpcDaConnectionProfile connectionProfile) {
         return CompletableSubject.fromAction(() -> doConnect(connectionProfile))
                 .andThen(waitUntilConnected())
                 .andThen(Single.just(this));
@@ -131,7 +133,9 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
         Credentials credentials = connectionProfile.getCredentials();
 
-        if (credentials != null && !(credentials instanceof NtlmCredentials)) {
+        Objects.requireNonNull(credentials, "Credentials must be provided");
+
+        if (!(credentials instanceof NtlmCredentials)) {
             throw new OpcException("Credentials " + credentials.getClass().getCanonicalName() +
                     " is not supported by OPC-DA connector. Please use " + NtlmCredentials.class.getCanonicalName());
         }
@@ -171,8 +175,9 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
             opcServer = new OPCServer(comServer.createInstance());
 
             opcItemProperties = opcServer.getItemPropertiesService();
-            scheduler = executorServiceFactory.createScheduler();
-            scheduler.scheduleWithFixedDelay(this::checkAlive, 0, connectionProfile.getKeepAliveInterval().toNanos(), TimeUnit.NANOSECONDS);
+            watcherTaskDisposable.dispose();
+            watcherTaskDisposable = schedulerFactory.forBlocking().schedulePeriodicallyDirect(this::checkAlive, 0,
+                    connectionProfile.getKeepAliveInterval().toNanos(), TimeUnit.NANOSECONDS);
         } catch (Exception e) {
             try {
                 disconnect().blockingAwait();
@@ -185,7 +190,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
 
     @Override
     public Completable disconnect() {
-        return CompletableSubject.fromAction(() -> doDisconnect())
+        return CompletableSubject.fromAction(this::doDisconnect)
                 .andThen(waitUntilDisconnected());
     }
 
@@ -193,9 +198,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         logger.info("Disconnecting now");
         try {
             getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
-            if (scheduler != null) {
-                scheduler.shutdown();
-            }
+            watcherTaskDisposable.dispose();
             destroySessions();
 
         } catch (Exception e) {
@@ -231,7 +234,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         comServer = null;
         session = null;
         opcServer = null;
-        scheduler = null;
+        watcherTaskDisposable = Disposables.disposed();
     }
 
 
@@ -265,7 +268,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     }
 
     @Override
-    public Flowable<OpcTagInfo> fetchMetadata(String... tagIds) {
+    public Flowable<OpcTagInfo> fetchMetadata(@Nonnull String... tagIds) {
         if (getConnectionState().blockingFirst() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to fetch metadata. Not connected!");
         }
@@ -328,7 +331,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     }
 
     @Override
-    public Flowable<OpcObjectInfo> fetchNextTreeLevel(String rootTagId) {
+    public Flowable<OpcObjectInfo> fetchNextTreeLevel(@Nonnull String rootTagId) {
         return Flowable.fromCallable(() -> doFetchNextTreeLevel(rootTagId))
                 .flatMap(Flowable::fromIterable);
     }
@@ -338,7 +341,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
         if (getConnectionState().blockingFirst() != ConnectionState.CONNECTED) {
             throw new OpcException("Unable to fetch tags. Not connected!");
         }
-        synchronized (opcServer) {
+        synchronized (this) {
             try {
                 opcServer.getBrowser().changePosition(rootTagId, OPCBROWSEDIRECTION.OPC_BROWSE_TO);
 
@@ -380,7 +383,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     }
 
     @Override
-    public Single<OpcDaSession> createSession(OpcDaSessionProfile sessionProfile) {
+    public Single<OpcDaSession> createSession(@Nonnull OpcDaSessionProfile sessionProfile) {
         return getConnectionState().firstOrError().flatMap(connectionState -> {
             if (connectionState != ConnectionState.CONNECTED) {
                 return Single.error(new OpcException("Unable to create a session. Not connected!"));
@@ -395,7 +398,7 @@ public class OpcDaTemplate extends AbstractOpcOperations<OpcDaConnectionProfile,
     }
 
     @Override
-    public Completable releaseSession(OpcDaSession session) {
+    public Completable releaseSession(@Nonnull OpcDaSession session) {
         return Completable.fromRunnable(() -> {
             if (getConnectionState().blockingFirst() == ConnectionState.CONNECTED && session != null) {
                 sessions.remove(session);
