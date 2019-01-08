@@ -261,7 +261,7 @@ public class OpcUaTemplateTest {
                 .flatMap(opcUaSession -> opcUaSession.stream("ns=2;s=sint", Duration.ofMillis(1))
                         .doFinally(opcUaSession::close)
                         .onBackpressureBuffer()
-                ).limit(10000)
+                ).take(10000)
                 .doFinally(opcUaTemplate::close)
                 .subscribe(subscriber);
 

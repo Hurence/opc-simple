@@ -293,7 +293,7 @@ A quick example:
 ````java
 
     //assumes connectionProfile and sessionProfile have already been defined.
-    Flowable<OpcData> flowable = daTemplate
+   daTemplate
         //establish a connection
         .connect(connectionProfile)
         .toFlowable()
@@ -319,6 +319,41 @@ A quick example:
         .subscribe(opcData-> doSomethingWithData(opcData));
 
 ````
+
+### Integrate with other reactive frameworks
+
+Rx-Java uses its Scheduler and Threading models but sometimes there is the need to use another 
+already in place thread pool.
+
+Here below you will find some examples.
+
+#### Integrate with Vert.x
+
+In order to best integrate with[Vert.x](https://vertx.io/) you should tell OPC simple to use the 
+already in-place event loops provided by Vert.x
+
+First of all, you need to import the rx-fied version of Vertx:
+
+```
+    <dependency>
+     <groupId>io.vertx</groupId>
+     <artifactId>vertx-rx-java2</artifactId>
+     <!-- REPLACE WITH YOUR VERTX VERSION -->
+     <version>3.6.2</version>
+    </dependency>
+```
+
+Then, as suggested by rx, you can override defaults schedulers in this way:
+
+````java
+    RxJavaPlugins.setComputationSchedulerHandler(s -> RxHelper.scheduler(vertx));
+    RxJavaPlugins.setIoSchedulerHandler(s -> RxHelper.blockingScheduler(vertx));
+    RxJavaPlugins.setNewThreadSchedulerHandler(s -> RxHelper.scheduler(vertx));
+````
+
+The framework will do the rest to chose the right scheduler for blocking and computation operations.
+You can still use *subscribeOn* and *observeOn* to better tune the performances according to Rx-Java 
+best practices.
 
 
 ## Authors

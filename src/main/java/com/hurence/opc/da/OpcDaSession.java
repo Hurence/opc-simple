@@ -84,11 +84,15 @@ public class OpcDaSession implements OpcSession {
             logger.info("Using revised session refresh rate: {} milliseconds", refreshRate);
             //start emitting hot flowable.
             masterFlowable = Flowable.interval(refreshRate, TimeUnit.MILLISECONDS)
-                    .takeWhile(ignored -> group != null)
-                    .flatMap(ignored ->
-                            read(refcountMap.keySet().toArray(new String[refcountMap.size()]))
-                                    .flattenAsFlowable(opcData -> opcData)
-                    ).publish().autoConnect();
+                    .takeWhile(ignored -> this.group != null)
+                    .filter(ignored -> !refcountMap.isEmpty())
+                    .flatMap(ignored -> {
+                                System.out.println(this.group);
+                                System.out.println(refcountMap);
+                                return read(refcountMap.keySet().toArray(new String[refcountMap.size()]))
+                                        .flattenAsFlowable(opcData -> opcData);
+                            }
+                    ).share();
 
         } catch (JIException e) {
             throw new OpcException("Unable to get revised refresh interval", e);
@@ -113,7 +117,6 @@ public class OpcDaSession implements OpcSession {
      */
     public void cleanup(OPCServer opcServer) {
         logger.info("Cleaning session");
-
         try {
             opcServer.removeGroup(group, true);
         } catch (JIException e) {
@@ -218,7 +221,7 @@ public class OpcDaSession implements OpcSession {
                 .andThen(masterFlowable)
                 .filter(opcData -> opcData.getTag().equals(tagId))
                 .distinctUntilChanged()
-                .sample(samplingInterval.toNanos(), TimeUnit.NANOSECONDS)
+                .throttleLatest(samplingInterval.toNanos(), TimeUnit.NANOSECONDS)
                 .doOnSubscribe(ignored -> incrementRefCount(tagId))
                 .doOnTerminate(() -> decrementRefCount(tagId));
     }
@@ -256,7 +259,7 @@ public class OpcDaSession implements OpcSession {
     public void close() {
         if (creatingOperations != null && creatingOperations.get() != null) {
             try {
-                creatingOperations.get().releaseSession(this);
+                creatingOperations.get().releaseSession(this).blockingAwait();
             } finally {
                 creatingOperations.clear();
             }

@@ -18,7 +18,6 @@
 package com.hurence.opc;
 
 import com.hurence.opc.exception.OpcException;
-import com.hurence.opc.util.ExecutorServiceFactory;
 import io.reactivex.Completable;
 import io.reactivex.Observable;
 import io.reactivex.subjects.BehaviorSubject;
@@ -38,32 +37,16 @@ public abstract class AbstractOpcOperations<T extends ConnectionProfile, U exten
      */
     private final BehaviorSubject<ConnectionState> connectionState = BehaviorSubject.createDefault(ConnectionState.DISCONNECTED);
 
-    /**
-     * The thread factory.
-     */
-    protected final ExecutorServiceFactory executorServiceFactory;
-
-    /**
-     * Construct an instance with an {@link ExecutorServiceFactory}
-     *
-     * @param executorServiceFactory the executor thread factory.
-     */
-    protected AbstractOpcOperations(ExecutorServiceFactory executorServiceFactory) {
-        this.executorServiceFactory = executorServiceFactory;
-    }
-
 
     /**
      * Atomically check a state and set next state.
      *
      * @param next of empty won't set anything.
-     * @return
+     * @return the connection state.
      */
     protected synchronized ConnectionState getStateAndSet(Optional<ConnectionState> next) {
         ConnectionState ret = connectionState.getValue();
-        if (next.isPresent()) {
-            connectionState.onNext(next.get());
-        }
+        next.ifPresent(connectionState::onNext);
         return ret;
     }
 

@@ -36,10 +36,12 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * E2E test. You can run by spawning an OPC-DA test server and changing connection parameters to target it.
@@ -191,24 +193,33 @@ public class OpcDaTemplateTest {
     public void listenToTags() throws Exception {
         OpcDaSessionProfile sessionProfile = new OpcDaSessionProfile()
                 .withDirectRead(false)
-                .withRefreshInterval(Duration.ofMillis(300));
+                .withRefreshInterval(Duration.ofMillis(30));
 
         try (OpcSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
             TestSubscriber<OpcData> subscriber = new TestSubscriber<>();
-            Flowable.merge(Flowable.fromArray(new String[]{"Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString"})
-                    .map(tagId -> session.stream(tagId, Duration.ofMillis(100))))
-                    .limit(20)
+            List<Flowable<OpcData>> flowables = Arrays.asList("Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
+                    .stream()
+                    .map(tagId -> session
+                            .stream(tagId, Duration.ofMillis(10))
+                            .take(20)
+                    ).collect(Collectors.toList());
+
+            Flowable.merge(flowables)
                     .subscribeOn(Schedulers.io())
+                    .observeOn(Schedulers.computation())
                     .subscribe(subscriber);
+
 
             subscriber
                     .await()
                     .assertComplete()
-                    .assertValueCount(20);
+                    .assertValueCount(60)
+                    .dispose();
 
 
             Assert.assertEquals(3, subscriber.values().stream().map(OpcData::getTag).distinct().count());
         }
+
     }
 
 

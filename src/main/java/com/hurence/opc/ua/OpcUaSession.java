@@ -21,12 +21,11 @@ import com.hurence.opc.OpcData;
 import com.hurence.opc.OpcSession;
 import com.hurence.opc.OperationStatus;
 import com.hurence.opc.exception.OpcException;
-import io.reactivex.BackpressureStrategy;
 import io.reactivex.Flowable;
 import io.reactivex.Single;
 import io.reactivex.disposables.Disposable;
+import io.reactivex.processors.PublishProcessor;
 import io.reactivex.subjects.CompletableSubject;
-import io.reactivex.subjects.UnicastSubject;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
 import org.eclipse.milo.opcua.sdk.client.api.subscriptions.UaMonitoredItem;
 import org.eclipse.milo.opcua.sdk.client.api.subscriptions.UaSubscription;
@@ -223,16 +222,17 @@ public class OpcUaSession implements OpcSession {
                             uaMonitoredItem.getReadValueId().getNodeId().toParseableString(),
                             uaMonitoredItem.getRevisedSamplingInterval());
 
-                    UnicastSubject<OpcData> ret = UnicastSubject.create();
+                    PublishProcessor<OpcData> ret = PublishProcessor.create();
                     uaMonitoredItem.setValueConsumer((uaMonitoredItem1, dataValue) ->
                             ret.onNext(opcData(uaMonitoredItem1.getReadValueId().getNodeId().toParseableString(), dataValue)));
                     final Disposable disposable = terminationSignal.subscribe(() ->
                             ret.onError(new OpcException("EOF reading from the stream. Client closed unexpectedly")));
-                    return ret.toFlowable(BackpressureStrategy.MISSING)
+                    return ret
                             .doOnComplete(() -> {
                                 logger.info("Clearing subscription for item {}", uaMonitoredItem);
                                 removeSubscriptions(Collections.singletonList(uaMonitoredItem));
-                            }).doFinally(() -> disposable.dispose());
+                            }).doFinally(() -> disposable.dispose())
+                            .share();
 
                 }).takeWhile(ignored -> !terminationSignal.hasComplete());
     }
