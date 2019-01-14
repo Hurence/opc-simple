@@ -86,12 +86,8 @@ public class OpcDaSession implements OpcSession {
             masterFlowable = Flowable.interval(refreshRate, TimeUnit.MILLISECONDS)
                     .takeWhile(ignored -> this.group != null)
                     .filter(ignored -> !refcountMap.isEmpty())
-                    .flatMap(ignored -> {
-                                System.out.println(this.group);
-                                System.out.println(refcountMap);
-                                return read(refcountMap.keySet().toArray(new String[refcountMap.size()]))
-                                        .flattenAsFlowable(opcData -> opcData);
-                            }
+                    .flatMap(ignored -> read(refcountMap.keySet().toArray(new String[refcountMap.size()]))
+                            .flattenAsFlowable(opcData -> opcData)
                     ).share();
 
         } catch (JIException e) {

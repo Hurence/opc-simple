@@ -24,7 +24,7 @@ import com.hurence.opc.exception.OpcException;
 import io.reactivex.Flowable;
 import io.reactivex.Single;
 import io.reactivex.disposables.Disposable;
-import io.reactivex.processors.PublishProcessor;
+import io.reactivex.processors.UnicastProcessor;
 import io.reactivex.subjects.CompletableSubject;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
 import org.eclipse.milo.opcua.sdk.client.api.subscriptions.UaMonitoredItem;
@@ -222,7 +222,7 @@ public class OpcUaSession implements OpcSession {
                             uaMonitoredItem.getReadValueId().getNodeId().toParseableString(),
                             uaMonitoredItem.getRevisedSamplingInterval());
 
-                    PublishProcessor<OpcData> ret = PublishProcessor.create();
+                    UnicastProcessor<OpcData> ret = UnicastProcessor.create();
                     uaMonitoredItem.setValueConsumer((uaMonitoredItem1, dataValue) ->
                             ret.onNext(opcData(uaMonitoredItem1.getReadValueId().getNodeId().toParseableString(), dataValue)));
                     final Disposable disposable = terminationSignal.subscribe(() ->
