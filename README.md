@@ -34,7 +34,7 @@ Add The maven dependency
 <dependency>
     <groupId>com.github.Hurence</groupId>
     <artifactId>opc-simple</artifactId>
-    <version>develop-SNAPSHOT</version>
+    <version>3.0.0-rc1</version>
 </dependency>
 
 ```

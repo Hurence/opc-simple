@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## Table of contents
 
-- [[Unreleased]](#unreleased)
+- [[3.0.0-rc1] (2019-01-16)](#300-rc1-2019-01-16)
 	- [Features](#features)
 	- [Bugfixes](#bugfixes)
 	- [Breaking changes](#breaking-changes)
@@ -20,7 +20,7 @@ All notable changes to this project will be documented in this file.
 	- [[1.0.0] (2018-04-16)](#100-2018-04-16)
 	- [Features](#features-4)
 
-## [Unreleased]
+## [3.0.0-rc1] (2019-01-16)
 
 ### Features
 - **OPC Simple goes ReactiveX**
@@ -70,12 +70,12 @@ All notable changes to this project will be documented in this file.
 
 - OPC-DA implementation with JInterop and Utgard
 
-
 [Unreleased]: https://github.com/Hurence/opc-simple/compare/master...develop
 [1.0.0]: https://github.com/Hurence/opc-simple/compare/7051ad30c02643a50827668b6f50066744e1204c...1.0.0
 [1.1.2]: https://github.com/Hurence/opc-simple/compare/1.0.0...1.1.2
 [1.2.0]: https://github.com/Hurence/opc-simple/compare/1.1.2...1.2.0
 [2.0.0]: https://github.com/Hurence/opc-simple/compare/2.0.0...1.2.0
 [2.0.1]: https://github.com/Hurence/opc-simple/compare/2.0.0...2.0.1
+[3.0.0-rc1]: https://github.com/Hurence/opc-simple/compare/3.0.0-rc1...2.0.1
 
 
