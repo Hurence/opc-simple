@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,8 +17,11 @@
 
 package com.hurence.opc;
 
+import io.reactivex.Flowable;
+import io.reactivex.Single;
+
+import java.time.Duration;
 import java.util.List;
-import java.util.stream.Stream;
 
 /**
  * Represents a session to manipulate a group of tags.
@@ -35,7 +38,7 @@ public interface OpcSession extends AutoCloseable {
      * @param tags the list of tags.
      * @return the values that have been read.
      */
-    List<OpcData> read(String... tags);
+    Single<List<OpcData>> read(String... tags);
 
     /**
      * Synchronously writes a list of tags and return as soon as possible.
@@ -44,16 +47,16 @@ public interface OpcSession extends AutoCloseable {
      * @param data the data to be written.
      * @return the status of each write operation.
      */
-    List<OperationStatus> write(OpcData... data);
+    Single<List<OperationStatus>> write(OpcData... data);
 
     /**
-     * Continuously read a stream of tags.
+     * Continuously read a stream of data for a tag.
      * When stream is requested, a subscription is done and values are output only in case they change.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues. In this case the streaming will be interrupted.
      *
-     * @param subscriptionConfiguration the never null subscription options (See {@link SubscriptionConfiguration}
-     * @param tags                      the tags to be read.
-     * @return a java {@link Stream}.
+     * @param tagId            the tas to be read.
+     * @param samplingInterval the sampling interval.
+     * @return a {@link Flowable} stream of {@link OpcData}
      */
-    Stream<OpcData> stream(SubscriptionConfiguration subscriptionConfiguration, String... tags);
+    Flowable<OpcData> stream(String tagId, Duration samplingInterval);
 }

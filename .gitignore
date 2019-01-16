@@ -29,6 +29,7 @@ hs_err_pid*
 **/target/*
 **/dependency-reduced-pom.xml
 
+
 # Misc
 *.tar.gz
 **/_build/

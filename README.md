@@ -1,10 +1,15 @@
 # OPC Simple
 
-OPC java interop made simple by [Hurence](https://www.hurence.com).
+OPC DA/UA made simple by [Hurence](https://www.hurence.com).
 
-This project is based on OpenSCADA UtGard and aims to provide you an easy to use java library harmonizing both
-OPC-DA and OPC-UA standards.
+An easy to use reactive and quite painless OPC UA/DA java library.
 
+Main benefits:
+
+- I support both OPC-DA and OPC-UA with a harmonized unique API.
+- I'm reactive (based on ReactiveX) and nonblocking operations makes me performing very fast.
+- I'm open source (Apache 2.0)
+- I'm portable (java based. No native code needed)
 
 ## Getting Started
 
@@ -29,7 +34,7 @@ Add The maven dependency
 <dependency>
     <groupId>com.github.Hurence</groupId>
     <artifactId>opc-simple</artifactId>
-    <version>2.0.1</version>
+    <version>3.0.0-rc1</version>
 </dependency>
 
 ```
@@ -52,6 +57,16 @@ And the needed repositories
 A step by step series of examples to showcase basic use cases.
 
 
+#### Preamble
+
+The library is built as close as possible to the reactive manifesto paradigms and is based on the 
+[RxJava](http://reactivex.io/) library.
+
+If you are not familiar with reactive programming, observer patterns, backpressure or with the rx-java 
+library in general, you can have further readings on the 
+[RxJava wiki](https://github.com/ReactiveX/RxJava/wiki/Additional-Reading)
+
+
 ##### Connect to an OPC-DA server
 
 As a prerequisite you should have an up an running OPC-DA server. In this example we'll use the
@@ -59,13 +74,13 @@ As a prerequisite you should have an up an running OPC-DA server. In this exampl
 
 Please feel free to change connection settings reflecting your real environment.
 
+Follows a simple blocking example (see after below for more complex reactive examples).
 
 
 ```java
 
 
-   //create a connection profile   
-   
+   //create a connection profile      
    OpcDaConnectionProfile connectionProfile = new OpcDaConnectionProfile()
          //change with the appropriate clsid
         .withComClsId("F8582CF2-88FB-11D0-B850-00C0F0104305")
@@ -79,10 +94,7 @@ Please feel free to change connection settings reflecting your real environment.
     //Create an instance of a da operations
     OpcDaOperations opcDaOperations = new OpcDaTemplate();
     //connect using our profile
-    opcDaOperations.connect(connectionProfile);
-    if (!opcDaOperations.awaitConnected()) {
-        throw new IllegalStateException("Unable to connect");
-    }
+    opcDaOperations.connect(connectionProfile).ignoreElement().blockingAwait();
         
 
 ```
@@ -95,6 +107,7 @@ As a prerequisite you should have an up an running OPC-UA server. In this exampl
 
 Please feel free to change connection settings reflecting your real environment.
 
+Follows a simple blocking example (see after below for more complex reactive examples).
 
 
 ```java
@@ -110,10 +123,10 @@ Please feel free to change connection settings reflecting your real environment.
     //Create an instance of a ua operations
     OpcUaOperations opcUaOperations = new OpcUaTemplate();
     //connect using our profile
-    opcUaOperations.connect(connectionProfile);
-    if (!opcUaOperations.awaitConnected()) {
-        throw new IllegalStateException("Unable to connect");
-    }
+    opcUaOperations.connect(connectionProfile)
+        .doOnError(throwable -> logger.error("Unable to connect", throwable))
+        .ignoreElement().blockingAwait();
+    
         
 
 ```
@@ -122,11 +135,23 @@ Please feel free to change connection settings reflecting your real environment.
 
 Assuming a connection is already in place, just browse the tags and print to stdout.
 
+Blocking example:
+
 ````java
 
-    opcDaOperations.browseTags().foreach(System.out::println);
+    opcDaOperations.browseTags().foreachBlocking(System.out::println);
+    //execution here is resumed when browse completed
 ````
 
+Or in a "reactive way"
+
+````java
+
+    opcDaOperations.browseTags().subscribe(System.out::println);
+    // code after is executed immediately without blocking (println is done asynchronously)
+    System.out.println("I'm a reactive OPC-Simple application :-)");
+
+````
 
 #### Browse the tree branch by branch
 
@@ -135,9 +160,8 @@ As an alternative you can browse level by level.
 
 For instance you can browse what's inside the group _Square Waves_:
 ````java
-
     opcDaOperations.fetchNextTreeLevel("Square Waves")
-                                    .forEach(System.out::println);
+        .subscribe(System.out::println);
 ````
 
 #### Using Sessions
@@ -160,9 +184,17 @@ Sessions should be created and released (beware leaks!) through the Connection o
 > Hence you can use the handy *try-with-resources* syntax without taking care about destroying connection or sessions.
 
 
+Reactive tips:
+
+> - Close your sessions in a *doFinally* block if you want to avoid leaks and you do not need anymore the session 
+> after downstream completes. 
+> - You can use *flatmap* operator to chain flows after creation of a connection or a session.
+> - You can handle backpressure and tune up the scheduler to be used for observe/subscribe operations.
+> The library itself does not make any assumption on it.
+
 ##### Create an OPC-DA session
 
-An example:
+An example (blocking version):
 
 ````java
 
@@ -172,25 +204,48 @@ An example:
         // refresh period
         .withRefreshInterval(Duration.ofMillis(100));
 
-    try (OpcSession session = opcDaOperations.createSession(sessionProfile)) {
+    try (OpcSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
         //do something useful with your session
     }
 ````
 
 ##### Create an OPC-UA session
 
-An example:
+An example (still blocking):
 
 ````java
 
   OpcUaSessionProfile sessionProfile = new OpcUaSessionProfile()
         //the publication window
-        .withDefaultPublicationInterval(Duration.ofMillis(100));
+        .withPublicationInterval(Duration.ofMillis(100));
 
         
-    try (OpcSession session = opcUaOperations.createSession(sessionProfile)) {
+    try (OpcSession session = opcUaOperations.createSession(sessionProfile).blockingGet()) {
         //do something useful with your session
     }
+````
+
+##### Create an OPC-UA session (reactive way)
+
+A more efficient nonblocking example here:
+
+````java
+
+    final OpcUaTemplate opcUaTemplate = new OpcUaTemplate()
+        
+        // first create a session with the desired profile
+        opcUaTemplate.createSession(new OpcUaSessionProfile()
+                        .withPublicationInterval(Duration.ofMillis(100))))
+                 // we got a single. Encapsulate in a flowable and chain
+                .toFlowable()
+                .flatMap(opcUaSession -> 
+                        //do something more interesting with your session
+                        Flowable
+                            .empty()
+                            //avoid open session leaks
+                            .doFinally(opcUaSession::close)
+                )         
+                .subscribe(...);
 ````
 
 #### Stream some tags readings
@@ -198,19 +253,107 @@ An example:
 Assuming a connection is already in place, just stream tags values 
 and as soon as possible print their values to stdout.
 
-````java
-    
-    try {
-        session = opcDaOperations.createSession(sessionProfile);
-        session.stream((new SubscriptionConfiguration().withDefaultSamplingInterval(Duration.ofMillis(100)),
-                "Read Error.Int4", "Square Waves.Real8", "Random.ArrayOfString")
-                .forEach(System.out::println);
-    } finally {
-        opcDaOperations.releaseSession(session);
-    }
 
+````java
+
+    final OpcDaTemplate opcDaTemplate = new OpcDaTemplate()
+        
+        // first create a session with the desired profile
+        opcDaTemplate
+            .createSession(new OpcDaSessionProfile()
+                // direct read from device
+                .withDirectRead(false)
+                // refresh period
+                .withRefreshInterval(Duration.ofMillis(100))
+             )             
+             // we got a single. Encapsulate in a flowable and chain
+            .toFlowable()
+            .flatMap(opcUaSession -> 
+                    // attach a stream to the session
+                    opcUaSession.stream("Square Waves.Real8", Duration.ofMillis(100))
+                        // close the session upon completion or error
+                        .doFinally(opcUaSession::close)
+            )                        
+            //buffer in case of backpressure (but you can also discard or keep latest)
+            .onBackpressureBuffer()
+            //avoid blocking current thread for iowaits
+            .subscribeOn(Schedulers.io())
+            //take only first 100 elements
+            .limit(100)
+            //subscribe to events (upstream will start emitting events)
+            .subscribe(opcData-> doSomethingWithData(opcData));
+````
+
+#### Advanced: managing automatic reconnection
+
+With ReactiveX you can handle your stream as you want and even do some retry on error.
+
+A quick example:
+
+````java
+
+    //assumes connectionProfile and sessionProfile have already been defined.
+   daTemplate
+        //establish a connection
+        .connect(connectionProfile)
+        .toFlowable()
+        .flatMap(client -> client.createSession(sessionProfile)
+            //when ready create a subscription and start streaming some data
+            .toFlowable()
+            .flatMap(session ->
+                    session.stream("Saw-toothed Waves.UInt4", Duration.ofMillis(100))                                
+            )
+            //do not forget to close connections
+            .doFinally(client::close)
+        )
+        //log upstream failures
+        .doOnError(throwable -> logger.warn("An error occurred. Retrying: " + throwable.getMessage()))
+        // Retry anything in case something failed failed
+        // You can use exp backoff or immediate as well
+        .retryWhen(throwable -> throwable.delay(1, TimeUnit.SECONDS))
+        // handle schedulers
+        .subscribeOn(Schedulers.io())
+        // handle backpressure
+        .onBackpressureBuffer()
+        // finally do something with this data :-)
+        .subscribe(opcData-> doSomethingWithData(opcData));
 
 ````
+
+### Integrate with other reactive frameworks
+
+Rx-Java uses its Scheduler and Threading models but sometimes there is the need to use another 
+already in place thread pool.
+
+Here below you will find some examples.
+
+#### Integrate with Vert.x
+
+In order to best integrate with[Vert.x](https://vertx.io/) you should tell OPC simple to use the 
+already in-place event loops provided by Vert.x
+
+First of all, you need to import the rx-fied version of Vertx:
+
+```
+    <dependency>
+     <groupId>io.vertx</groupId>
+     <artifactId>vertx-rx-java2</artifactId>
+     <!-- REPLACE WITH YOUR VERTX VERSION -->
+     <version>3.6.2</version>
+    </dependency>
+```
+
+Then, as suggested by rx, you can override defaults schedulers in this way:
+
+````java
+    RxJavaPlugins.setComputationSchedulerHandler(s -> RxHelper.scheduler(vertx));
+    RxJavaPlugins.setIoSchedulerHandler(s -> RxHelper.blockingScheduler(vertx));
+    RxJavaPlugins.setNewThreadSchedulerHandler(s -> RxHelper.scheduler(vertx));
+````
+
+The framework will do the rest to chose the right scheduler for blocking and computation operations.
+You can still use *subscribeOn* and *observeOn* to better tune the performances according to Rx-Java 
+best practices.
 
 
 ## Authors
@@ -222,6 +365,10 @@ See also the list of [contributors](https://github.com/Hurence/opc-simple/contri
 ## License
 
 This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details
+
+## Changelog
+
+Everything is tracked on a dedicate [CHANGELOG](CHANGELOG.md) file.
 
 ## Acknowledgments
 

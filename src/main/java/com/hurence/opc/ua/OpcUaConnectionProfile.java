@@ -20,8 +20,6 @@ package com.hurence.opc.ua;
 import com.hurence.opc.ConnectionProfile;
 import com.hurence.opc.auth.X509Credentials;
 
-import java.net.URL;
-
 /**
  * Connection profile for OPC-UA.
  *
@@ -29,10 +27,7 @@ import java.net.URL;
  */
 public class OpcUaConnectionProfile extends ConnectionProfile<OpcUaConnectionProfile> {
 
-    /**
-     * The endpoint URL.
-     */
-    private URL endpointUrl;
+
     /**
      * THe client ID URI.
      * <p>

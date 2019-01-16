@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package com.hurence.opc.ua;
 
 import com.hurence.opc.SessionProfile;
 
+import javax.annotation.Nonnull;
 import java.time.Duration;
 
 /**
@@ -31,41 +32,41 @@ public class OpcUaSessionProfile extends SessionProfile<OpcUaSessionProfile> {
     /**
      * The data publication interval (we ask the server to publish at this rate).
      */
-    private Duration defaultPublicationInterval = Duration.ofSeconds(1);
+    private Duration publicationInterval = Duration.ofSeconds(1);
 
     /**
      * Get The data publication interval (we ask the server to publish at this rate).
      *
      * @return a {@link Duration}
      */
-    public Duration getDefaultPublicationInterval() {
-        return defaultPublicationInterval;
+    public Duration getPublicationInterval() {
+        return publicationInterval;
     }
 
     /**
      * Set data publication interval (we ask the server to publish at this rate).
      *
-     * @param defaultPublicationInterval the never null publication interval.
+     * @param publicationInterval the never null publication interval.
      */
-    public void setDefaultPublicationInterval(Duration defaultPublicationInterval) {
-        this.defaultPublicationInterval = defaultPublicationInterval;
+    public void setPublicationInterval(@Nonnull Duration publicationInterval) {
+        this.publicationInterval = publicationInterval;
     }
 
     /**
      * Set data publication interval (we ask the server to publish at this rate).
      *
-     * @param defaultPublicationInterval the never null publication interval.
+     * @param publicationInterval the never null publication interval.
      * @return itself.
      */
-    public OpcUaSessionProfile withDefaultPublicationInterval(Duration defaultPublicationInterval) {
-        setDefaultPublicationInterval(defaultPublicationInterval);
+    public OpcUaSessionProfile withPublicationInterval(@Nonnull Duration publicationInterval) {
+        setPublicationInterval(publicationInterval);
         return this;
     }
 
     @Override
     public String toString() {
         return "OpcUaSessionProfile{" +
-                "defaultPublicationInterval=" + defaultPublicationInterval +
+                "publicationInterval=" + publicationInterval +
                 "} " + super.toString();
     }
 }

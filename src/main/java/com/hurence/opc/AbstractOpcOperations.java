@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,7 +17,10 @@
 
 package com.hurence.opc;
 
-import com.hurence.opc.util.ExecutorServiceFactory;
+import com.hurence.opc.exception.OpcException;
+import io.reactivex.Completable;
+import io.reactivex.Observable;
+import io.reactivex.subjects.BehaviorSubject;
 
 import java.util.Optional;
 
@@ -32,69 +35,68 @@ public abstract class AbstractOpcOperations<T extends ConnectionProfile, U exten
     /**
      * The connection state
      */
-    private volatile ConnectionState connectionState = ConnectionState.DISCONNECTED;
-
-    /**
-     * The thread factory.
-     */
-    protected final ExecutorServiceFactory executorServiceFactory;
-
-    /**
-     * Construct an instance with an {@link ExecutorServiceFactory}
-     *
-     * @param executorServiceFactory the executor thread factory.
-     */
-    protected AbstractOpcOperations(ExecutorServiceFactory executorServiceFactory) {
-        this.executorServiceFactory = executorServiceFactory;
-    }
+    private final BehaviorSubject<ConnectionState> connectionState = BehaviorSubject.createDefault(ConnectionState.DISCONNECTED);
 
 
     /**
      * Atomically check a state and set next state.
      *
      * @param next of empty won't set anything.
-     * @return
+     * @return the connection state.
      */
     protected synchronized ConnectionState getStateAndSet(Optional<ConnectionState> next) {
-        ConnectionState ret = connectionState;
-        if (next.isPresent()) {
-            connectionState = next.get();
-        }
+        ConnectionState ret = connectionState.getValue();
+        next.ifPresent(connectionState::onNext);
         return ret;
     }
 
 
     @Override
-    public final ConnectionState getConnectionState() {
-        return getStateAndSet(Optional.empty());
+    public final Observable<ConnectionState> getConnectionState() {
+        return connectionState;
     }
 
-    @Override
-    public final boolean awaitConnected() {
-        while (getConnectionState() != ConnectionState.CONNECTED) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    @Override
-    public final boolean awaitDisconnected() {
-        while (getConnectionState() != ConnectionState.DISCONNECTED) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                return false;
-            }
-        }
-        return true;
-    }
 
     @Override
     public boolean isChannelSecured() {
         return false;
+    }
+
+    /**
+     * Wait until connection is released.
+     *
+     * @return a {@link Completable} task.
+     */
+    protected Completable waitUntilDisconnected() {
+        return getConnectionState()
+                .takeWhile(connectionState -> connectionState != ConnectionState.DISCONNECTED)
+                .filter(connectionState -> connectionState == ConnectionState.CONNECTED || connectionState == ConnectionState.DISCONNECTED)
+                .switchMapCompletable(connectionState -> {
+                    switch (connectionState) {
+                        case CONNECTED:
+                            return Completable.error(new OpcException("Client still in connected state"));
+                        default:
+                            return Completable.complete();
+                    }
+                });
+    }
+
+    /**
+     * Wait until connection is established.
+     *
+     * @return a {@link Completable} task.
+     */
+    protected Completable waitUntilConnected() {
+        return getConnectionState()
+                .takeWhile(connectionState -> connectionState != ConnectionState.CONNECTED)
+                .filter(connectionState -> connectionState == ConnectionState.CONNECTED || connectionState == ConnectionState.DISCONNECTED)
+                .switchMapCompletable(connectionState -> {
+                    switch (connectionState) {
+                        case DISCONNECTED:
+                            return Completable.error(new OpcException("Client disconnected while waiting for connection handshake"));
+                        default:
+                            return Completable.complete();
+                    }
+                });
     }
 }

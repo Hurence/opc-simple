@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,8 +22,11 @@ import com.hurence.opc.auth.Credentials;
 import com.hurence.opc.auth.UsernamePasswordCredentials;
 import com.hurence.opc.auth.X509Credentials;
 import com.hurence.opc.exception.OpcException;
-import com.hurence.opc.util.ExecutorServiceFactory;
-import com.hurence.opc.util.SingleThreadedExecutorServiceFactory;
+import io.reactivex.*;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.Disposables;
+import io.reactivex.schedulers.Schedulers;
+import io.reactivex.subjects.CompletableSubject;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.milo.opcua.sdk.client.OpcUaClient;
 import org.eclipse.milo.opcua.sdk.client.api.config.OpcUaClientConfig;
@@ -35,8 +38,6 @@ import org.eclipse.milo.opcua.sdk.client.api.identity.X509IdentityProvider;
 import org.eclipse.milo.opcua.sdk.client.api.nodes.Node;
 import org.eclipse.milo.opcua.sdk.client.api.nodes.VariableNode;
 import org.eclipse.milo.opcua.sdk.client.api.nodes.VariableTypeNode;
-import org.eclipse.milo.opcua.sdk.client.model.nodes.objects.ServerNode;
-import org.eclipse.milo.opcua.sdk.client.model.nodes.variables.ServerStatusNode;
 import org.eclipse.milo.opcua.sdk.client.nodes.UaVariableNode;
 import org.eclipse.milo.opcua.sdk.core.AccessLevel;
 import org.eclipse.milo.opcua.stack.client.UaTcpStackClient;
@@ -44,31 +45,27 @@ import org.eclipse.milo.opcua.stack.core.AttributeId;
 import org.eclipse.milo.opcua.stack.core.Identifiers;
 import org.eclipse.milo.opcua.stack.core.UaException;
 import org.eclipse.milo.opcua.stack.core.security.SecurityPolicy;
+import org.eclipse.milo.opcua.stack.core.types.builtin.DataValue;
 import org.eclipse.milo.opcua.stack.core.types.builtin.LocalizedText;
 import org.eclipse.milo.opcua.stack.core.types.builtin.NodeId;
 import org.eclipse.milo.opcua.stack.core.types.builtin.unsigned.UInteger;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.BrowseDirection;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.BrowseResultMask;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.NodeClass;
-import org.eclipse.milo.opcua.stack.core.types.enumerated.ServerState;
+import org.eclipse.milo.opcua.stack.core.types.enumerated.*;
 import org.eclipse.milo.opcua.stack.core.types.structured.BrowseDescription;
+import org.eclipse.milo.opcua.stack.core.types.structured.BrowseResult;
 import org.eclipse.milo.opcua.stack.core.types.structured.EndpointDescription;
-import org.eclipse.milo.opcua.stack.core.types.structured.ReferenceDescription;
 import org.eclipse.milo.opcua.stack.core.util.CertificateUtil;
 import org.eclipse.milo.opcua.stack.core.util.CryptoRestrictions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nonnull;
 import java.security.KeyPair;
 import java.security.Security;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * OPC-UA implementation of {@link com.hurence.opc.OpcOperations}
@@ -100,43 +97,29 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
      */
     private OpcUaClient client;
     /**
-     * The scheduler service.
+     * The watcher task disposable.
      */
-    private ScheduledExecutorService scheduler;
+    private Disposable watcherTaskDisposable = Disposables.disposed();
 
-    /**
-     * Construct an instance with an {@link ExecutorServiceFactory}
-     *
-     * @param executorServiceFactory the executor thread factory.
-     */
-    public OpcUaTemplate(ExecutorServiceFactory executorServiceFactory) {
-        super(executorServiceFactory);
-    }
-
-    /**
-     * Standard constructor. Uses a single threaded worker.
-     */
-    public OpcUaTemplate() {
-        this(SingleThreadedExecutorServiceFactory.instance());
-    }
 
     /**
      * Check if the underlying connection to the com server is still alive.
-     * Reconnects as well in case the autoreconnect has been set to true
      */
     private synchronized void checkAlive() {
-        ConnectionState connectionState = getConnectionState();
+        ConnectionState connectionState = getConnectionState().blockingFirst();
         if (client != null && (connectionState == ConnectionState.CONNECTING || connectionState == ConnectionState.CONNECTED)) {
             boolean inError = false;
             try {
                 // Get a typed reference to the Server object: ServerNode
-                ServerState serverState = client.getAddressSpace().
-                        getObjectNode(Identifiers.Server, ServerNode.class)
-                        .thenCompose(ServerNode::getServerStatusNode)
-                        .thenCompose(ServerStatusNode::getState)
-                        .get();
+                final DataValue serverState = client.readValue(0.0,
+                        TimestampsToReturn.Neither, Identifiers.Server_ServerStatus_State)
+                        .get(client.getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
 
-                if (serverState == null || !ServerState.Running.equals(serverState)) {
+                if (serverState == null ||
+                        !serverState.getStatusCode().isGood() ||
+                        serverState.getValue() == null ||
+                        serverState.getValue().isNull() ||
+                        !serverState.getValue().getValue().equals(ServerState.Running.getValue())) {
                     logger.warn("Server is no more running but rather is in state {}", serverState);
                     inError = true;
                 }
@@ -146,7 +129,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             }
 
             if (inError) {
-                disconnect();
+                disconnect().blockingAwait();
             } else {
                 getStateAndSet(Optional.of(ConnectionState.CONNECTED));
             }
@@ -265,24 +248,29 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
     @Override
     public boolean isChannelSecured() {
-        if (client == null || !getConnectionState().equals(ConnectionState.CONNECTED)) {
+        if (client == null || !getConnectionState().blockingFirst().equals(ConnectionState.CONNECTED)) {
             throw new OpcException("Cannot state security on non established link. Please connect first");
         }
-        if (client.getStackClient().getEndpoint().isPresent()) {
-            return !SecurityPolicy.None.equals(SecurityPolicy.fromUriSafe(
-                    client.getStackClient().getEndpoint().get().getSecurityPolicyUri()).orElse(null));
-        }
-        return false;
+        return client.getStackClient().getEndpoint().isPresent() &&
+                !SecurityPolicy.None.equals(SecurityPolicy.fromUriSafe(client.getStackClient().getEndpoint().get().getSecurityPolicyUri()).orElse(null));
     }
 
     @Override
-    public void connect(OpcUaConnectionProfile connectionProfile) {
+    public Single<OpcUaOperations> connect(@Nonnull OpcUaConnectionProfile connectionProfile) {
+        return Completable
+                .fromAction(() -> doConnect(connectionProfile))
+                .andThen(waitUntilConnected())
+                .andThen(Single.just(this));
+    }
+
+    private void doConnect(OpcUaConnectionProfile connectionProfile) {
+
         if (connectionProfile == null || connectionProfile.getCredentials() == null ||
                 connectionProfile.getConnectionUri() == null) {
             throw new OpcException("Please provide any valid non null connection profile with valid credentials");
         }
 
-        ConnectionState cs = getConnectionState();
+        ConnectionState cs = getConnectionState().blockingFirst();
         if (cs != ConnectionState.DISCONNECTED) {
             throw new OpcException("There is already an active connection. Please disconnect first");
         }
@@ -293,12 +281,13 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
             client = new OpcUaClient(config);
             //block until connected
             client.connect().get(client.getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
-            scheduler = executorServiceFactory.createScheduler();
-            scheduler.scheduleWithFixedDelay(this::checkAlive, 0, connectionProfile.getKeepAliveInterval().toNanos(), TimeUnit.NANOSECONDS);
+            watcherTaskDisposable.dispose();
+            watcherTaskDisposable = Schedulers.io().schedulePeriodicallyDirect(
+                    this::checkAlive, 0, connectionProfile.getKeepAliveInterval().toNanos(), TimeUnit.NANOSECONDS);
             getStateAndSet(Optional.of(ConnectionState.CONNECTED));
         } catch (Exception e) {
             try {
-                disconnect();
+                disconnect().blockingAwait(connectionProfile.getSocketTimeout().toMillis(), TimeUnit.MILLISECONDS);
             } finally {
                 throw new OpcException("Unexpected exception occurred while connecting", e);
             }
@@ -306,7 +295,14 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
     }
 
     @Override
-    public void disconnect() {
+    public Completable disconnect() {
+        return CompletableSubject.fromAction(this::doDisconnect)
+                .andThen(waitUntilDisconnected());
+    }
+
+    private void doDisconnect() {
+        logger.info("Disconnecting now");
+        getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
         try {
             //cleanup here
             while (!sessions.isEmpty()) {
@@ -320,47 +316,47 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
                     logger.warn("Unable to properly close a session", e);
                 }
             }
-            getStateAndSet(Optional.of(ConnectionState.DISCONNECTING));
-            if (scheduler != null) {
-                scheduler.shutdown();
-            }
+            watcherTaskDisposable.dispose();
             if (client != null) {
                 client.getSubscriptionManager().clearSubscriptions();
                 client.disconnect().get(client.getConfig().getRequestTimeout().longValue(), TimeUnit.MILLISECONDS);
 
+
             }
         } catch (Exception e) {
-            throw new OpcException("Unable to properly disconnect", e);
+            try {
+                client.getStackClient().disconnect().get();
+            } catch (Exception e1) {
+                logger.error("Unable to force the disconnection. Client may be in a bad shape", e1);
+            } finally {
+                throw new OpcException("Unable to properly disconnect", e);
+            }
         } finally {
             getStateAndSet(Optional.of(ConnectionState.DISCONNECTED));
-            scheduler = null;
+            watcherTaskDisposable = Disposables.disposed();
             client = null;
         }
     }
 
     @Override
-    public Collection<OpcTagInfo> fetchMetadata(String... tagIds) {
-        Collection<OpcTagInfo> ret = new ArrayList<>();
-        for (String t : tagIds) {
-            try {
-                NodeId target = NodeId.parse(t);
-                Node node = client.getAddressSpace().createNode(target).get();
+    public Flowable<OpcTagInfo> fetchMetadata(@Nonnull String... tagIds) {
+        return Flowable.fromArray(tagIds)
+                .flatMap(t -> Flowable.create(emitter -> {
+                    try {
+                        NodeId target = NodeId.parse(t);
+                        Node node = client.getAddressSpace().createNode(target).get();
 
-                if (!(node instanceof VariableNode)) {
-                    throw new IllegalArgumentException("Tag " + t + " is not a Variable node");
-                }
+                        if (!(node instanceof VariableNode)) {
+                            emitter.onError(new IllegalArgumentException("Tag " + t + " is not a Variable node"));
+                        }
 
-                List<OpcTagInfo> tmp = new ArrayList<>();
-                browse(node.getNodeId().get(), null, tmp);
-                if (!tmp.isEmpty()) {
-                    ret.add(tmp.get(0));
-                }
-            } catch (Exception e) {
-                throw new OpcException("Unable to fetch metadata for tag " + t, e);
-            }
-        }
-
-        return ret;
+                        final NodeId nodeId = node.getNodeId().get();
+                        browse(nodeId, null, emitter);
+                        emitter.onComplete();
+                    } catch (Exception e) {
+                        emitter.onError(new OpcException("Unable to fetch metadata for tag " + t, e));
+                    }
+                }, BackpressureStrategy.MISSING));
     }
 
 
@@ -371,10 +367,10 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
      * @param root        the root path.
      * @param prevTagInfo the previous found tag (only if coming from -1 level.) This is used to decorate
      *                    a variable node tag with properties found in level +1.
-     * @param result      the result collection container.
+     * @param subscriber  the subject who subscribed for this data.
      * @throws Exception in case of any issue.
      */
-    private void browse(NodeId root, OpcTagInfo prevTagInfo, Collection<OpcTagInfo> result) throws Exception {
+    private void browse(NodeId root, OpcTagInfo prevTagInfo, Emitter<? super OpcTagInfo> subscriber) throws Exception {
         Node n;
         try {
             n = client.getAddressSpace().createNode(root).get();
@@ -414,7 +410,7 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
                     currentTagInfo = new OpcTagInfo(nodeId.toParseableString())
                             .withName(n.getBrowseName().get().getName())
                             .withType(cls.get());
-                    result.add(fillOpcTagInformation(currentTagInfo, vn));
+                    subscriber.onNext(fillOpcTagInformation(currentTagInfo, vn));
                 }
 
             }
@@ -424,49 +420,56 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
         List<Node> nodes = client.getAddressSpace().browse(root).get();
         if (nodes != null && !nodes.isEmpty()) {
             for (Node child : nodes) {
-                browse(child.getNodeId().get(), currentTagInfo, result);
+                try {
+                    browse(child.getNodeId().get(), currentTagInfo, subscriber);
+                } catch (Exception e) {
+                    logger.warn("Skipping node {} because of an unexpected error: {}", child, e.getMessage());
+                }
             }
         }
 
     }
 
+    private Flowable<BrowseResult> doBrowseAll(@Nonnull BrowseResult previous) {
+        if (previous != null && previous.getContinuationPoint() != null && previous.getContinuationPoint().isNotNull()) {
+            return Flowable.merge(Flowable.just(previous),
+                    Flowable.fromFuture(client.browseNext(true, previous.getContinuationPoint()).toCompletableFuture())
+            ).flatMap(this::doBrowseAll);
+        }
+        return Flowable.just(previous);
+    }
+
 
     @Override
-    public Collection<OpcObjectInfo> fetchNextTreeLevel(String rootTagId) {
-        try {
-            Map<NodeId, ReferenceDescription> results = Arrays.stream(
-                    client.browse(new BrowseDescription(NodeId.parse(rootTagId), BrowseDirection.Forward,
-                            Identifiers.HierarchicalReferences, true,
-                            UInteger.valueOf(NodeClass.Object.getValue() | NodeClass.Variable.getValue()),
-                            UInteger.valueOf(BrowseResultMask.All.getValue()))).get().getReferences())
-                    .filter(referenceDescription -> referenceDescription.getNodeId().local().isPresent())
-                    .collect(Collectors.toMap(referenceDescription -> referenceDescription.getNodeId().local().get(),
-                            Function.identity(), (k1, k2) -> k1, LinkedHashMap::new));
+    public Flowable<OpcObjectInfo> fetchNextTreeLevel(@Nonnull String rootTagId) {
+        return Flowable.fromFuture(client.browse(new BrowseDescription(NodeId.parse(rootTagId), BrowseDirection.Forward,
+                Identifiers.HierarchicalReferences, true,
+                UInteger.valueOf(NodeClass.Object.getValue() | NodeClass.Variable.getValue()),
+                UInteger.valueOf(BrowseResultMask.All.getValue()))))
+                .flatMap(this::doBrowseAll)
+                .flatMap(browseResult -> browseResult.getReferences() != null ?
+                        Flowable.fromArray(browseResult.getReferences()) : Flowable.empty())
+                .filter(referenceDescription -> !referenceDescription.getTypeDefinition().isLocal() ||
+                        !referenceDescription.getTypeDefinition().local().get().equals(Identifiers.PropertyType))
+                .map(referenceDescription -> (NodeClass.Object.equals(referenceDescription.getNodeClass()) ?
+                        new OpcContainerInfo(referenceDescription.getNodeId().local().get().toParseableString()) :
+                        new OpcTagInfo(referenceDescription.getNodeId().local().get().toParseableString()))
+                        .withDescription(referenceDescription.getDisplayName().getText())
+                        .withName(referenceDescription.getBrowseName().getName()));
 
-            return results.values().stream()
-                    .filter(referenceDescription -> !referenceDescription.getTypeDefinition().isLocal() ||
-                            !referenceDescription.getTypeDefinition().local().get().equals(Identifiers.PropertyType))
-                    .map(referenceDescription -> (NodeClass.Object.equals(referenceDescription.getNodeClass()) ?
-                            new OpcContainerInfo(referenceDescription.getNodeId().local().get().toParseableString()) :
-                            new OpcTagInfo(referenceDescription.getNodeId().local().get().toParseableString()))
-                            .withDescription(referenceDescription.getDisplayName().getText())
-                            .withName(referenceDescription.getBrowseName().getName()))
-                    .collect(Collectors.toList());
 
-        } catch (Exception e) {
-            throw new OpcException("Unable to browse OPC address space", e);
-        }
     }
 
     @Override
-    public Collection<OpcTagInfo> browseTags() {
-        Set<OpcTagInfo> ret = new LinkedHashSet<>();
-        try {
-            browse(Identifiers.RootFolder, null, ret);
-        } catch (Exception e) {
-            throw new OpcException("Unable to browse tags", e);
-        }
-        return ret;
+    public Flowable<OpcTagInfo> browseTags() {
+        return Flowable.create(emitter -> {
+            try {
+                browse(Identifiers.RootFolder, null, emitter);
+                emitter.onComplete();
+            } catch (Exception e) {
+                emitter.onError(new OpcException("Unexpected exception while browsing tags", e));
+            }
+        }, BackpressureStrategy.MISSING);
     }
 
     /**
@@ -537,23 +540,25 @@ public class OpcUaTemplate extends AbstractOpcOperations<OpcUaConnectionProfile,
 
 
     @Override
-    public OpcUaSession createSession(OpcUaSessionProfile sessionProfile) {
-        OpcUaSession ret = OpcUaSession.create(this, client, sessionProfile);
-        sessions.add(ret);
-        return ret;
+    public Single<OpcUaSession> createSession(@Nonnull OpcUaSessionProfile sessionProfile) {
+        return Single.fromCallable(() -> OpcUaSession.create(this, client, sessionProfile))
+                .doOnSuccess(sessions::add);
     }
 
     @Override
-    public void releaseSession(OpcUaSession session) {
-        if (getConnectionState() == ConnectionState.CONNECTED && session != null) {
+    public Completable releaseSession(@Nonnull OpcUaSession session) {
+        return Completable.fromRunnable(() -> {
             sessions.remove(session);
             session.cleanup();
-        }
+        });
     }
 
 
     @Override
     public void close() throws Exception {
-        disconnect();
+        disconnect()
+                .doOnError(throwable -> logger.warn("Unexpected error while closing UA client", throwable))
+                .onErrorComplete()
+                .blockingAwait();
     }
 }

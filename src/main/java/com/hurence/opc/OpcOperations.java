@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,7 +17,12 @@
 
 package com.hurence.opc;
 
-import java.util.Collection;
+import io.reactivex.Completable;
+import io.reactivex.Flowable;
+import io.reactivex.Observable;
+import io.reactivex.Single;
+
+import javax.annotation.Nonnull;
 
 /**
  * Base Interface to describe OPC releated operations
@@ -33,12 +38,12 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
      *
      * @param connectionProfile the connection information
      */
-    void connect(T connectionProfile);
+    Single<? extends OpcOperations<T, U, V>> connect(@Nonnull T connectionProfile);
 
     /**
      * Disconnects from the OPC server.
      */
-    void disconnect();
+    Completable disconnect();
 
 
     /**
@@ -49,38 +54,37 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
     boolean isChannelSecured();
 
     /**
-     * Retrieves the state of the current connection.
+     * Retrieves observable connected to the state of the current connection.
      *
-     * @return the {@link ConnectionState}
+     * @return the {@link ConnectionState} as an {@link Observable}
      */
-    ConnectionState getConnectionState();
+    Observable<ConnectionState> getConnectionState();
 
     /**
      * Retrieves the list of tags.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
      *
-     * @return a never null {@link Collection}
+     * @return a {@link Flowable} stream of {@link OpcTagInfo}
      */
-    Collection<OpcTagInfo> browseTags();
+    Flowable<OpcTagInfo> browseTags();
 
     /**
      * Inspects the OPC tree starting from the provided tree (empty is the root) and returns only the next level.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
      *
      * @param rootTagId the root tag to begin exploring from.
-     *
-     * @return a never null {@link Collection} of {@link OpcObjectInfo} (may also be {@link OpcTagInfo} in case is a leaf)
+     * @return a {@link Flowable} stream of {@link OpcObjectInfo} (may also be {@link OpcTagInfo} in case is a leaf)
      */
-    Collection<OpcObjectInfo> fetchNextTreeLevel(String rootTagId);
+    Flowable<OpcObjectInfo> fetchNextTreeLevel(@Nonnull String rootTagId);
 
     /**
      * Fetch metadata of provided tags.
      * May throw {@link com.hurence.opc.exception.OpcException} in case of issues.
      *
      * @param tagIds the id of tags to fetch.
-     * @return a never null {@link Collection}
+     * @return a {@link Flowable} stream of {@link OpcTagInfo}
      */
-    Collection<OpcTagInfo> fetchMetadata(String... tagIds);
+    Flowable<OpcTagInfo> fetchMetadata(@Nonnull String... tagIds);
 
     /**
      * Create a new {@link OpcSession} and attach to the current connection.
@@ -89,31 +93,16 @@ public interface OpcOperations<T extends ConnectionProfile, U extends SessionPro
      * @param sessionProfile the information about the session to be created.
      * @return the session.
      */
-    V createSession(U sessionProfile);
+    Single<V> createSession(@Nonnull U sessionProfile);
 
 
     /**
      * Clear up the session and detatch it from the current session.
      *
      * @param session the session to be destroyed.
+     * @return a {@link Completable} operation.
      */
-    void releaseSession(V session);
-
-
-    /**
-     * Wait until the connection has been established.
-     *
-     * @return true if the connect operation was successful.
-     */
-    boolean awaitConnected();
-
-
-    /**
-     * Wait until the connection has been disconnected.
-     *
-     * @return true if the disconnect operation was successful.
-     */
-    boolean awaitDisconnected();
+    Completable releaseSession(@Nonnull V session);
 
 
 }
