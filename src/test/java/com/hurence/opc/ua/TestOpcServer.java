@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2018 Hurence (support@hurence.com)
+ *  Copyright (C) 2019 Hurence (support@hurence.com)
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ import java.security.cert.X509Certificate;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 import static com.google.common.collect.Lists.newArrayList;
 
@@ -57,6 +58,17 @@ public class TestOpcServer implements AutoCloseable {
         Security.addProvider(new BouncyCastleProvider());
     }
 
+    public static void main(String[] args) throws Exception {
+        final TestOpcServer server = new TestOpcServer(InetAddress.getLoopbackAddress(), null);
+        server.getInstance().startup()
+                .thenAccept(opcUaServer -> logger.info("Started server on {}", server.getBindEndpoint())).get();
+        final CompletableFuture<Void> future = new CompletableFuture<>();
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> future.complete(null)));
+        future.get();
+
+
+    }
+
 
     private final OpcUaServer instance;
 
@@ -67,8 +79,8 @@ public class TestOpcServer implements AutoCloseable {
                     String username = authChallenge.getUsername();
                     String password = authChallenge.getPassword();
 
-                    boolean userOk = "user" .equals(username) && "password1" .equals(password);
-                    boolean adminOk = "admin" .equals(username) && "password2" .equals(password);
+                    boolean userOk = "user".equals(username) && "password1".equals(password);
+                    boolean adminOk = "admin".equals(username) && "password2".equals(password);
 
                     return userOk || adminOk;
                 }
