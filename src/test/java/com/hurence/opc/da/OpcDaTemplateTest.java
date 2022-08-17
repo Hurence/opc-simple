@@ -31,6 +31,7 @@ import org.jinterop.dcom.core.JIVariant;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.bridge.SLF4JBridgeHandler;
 
 import java.net.URI;
 import java.time.Duration;
@@ -51,6 +52,10 @@ import java.util.stream.Collectors;
  */
 @Ignore
 public class OpcDaTemplateTest {
+    static {
+        SLF4JBridgeHandler.removeHandlersForRootLogger();
+        SLF4JBridgeHandler.install();
+    }
 
     private final Logger logger = LoggerFactory.getLogger(OpcDaTemplateTest.class);
 
@@ -132,12 +137,12 @@ public class OpcDaTemplateTest {
                 .withRefreshInterval(Duration.ofMillis(300));
 
         List<Timed<OpcData>> received = Flowable.combineLatest(
-                Flowable.interval(10, TimeUnit.MILLISECONDS),
-                opcDaOperations.createSession(sessionProfile).toFlowable()
-                        .flatMap(session -> session.stream("Square Waves.Real8", Duration.ofMillis(10))
-                                .doFinally(session::close)
+                        Flowable.interval(10, TimeUnit.MILLISECONDS),
+                        opcDaOperations.createSession(sessionProfile).toFlowable()
+                                .flatMap(session -> session.stream("Square Waves.Real8", Duration.ofMillis(10))
+                                        .doFinally(session::close)
 
-                        ), (a, b) -> b)
+                                ), (a, b) -> b)
                 .sample(10, TimeUnit.MILLISECONDS)
                 .timeInterval()
                 .limit(100)
@@ -285,8 +290,8 @@ public class OpcDaTemplateTest {
         try (OpcDaSession session = opcDaOperations.createSession(sessionProfile).blockingGet()) {
             List<OpcTagInfo> tagList = opcDaOperations.browseTags().toList().blockingGet();
             Flowable.merge(Flowable.fromArray(tagList.toArray(new OpcTagInfo[tagList.size()]))
-                    .map(tagInfo -> session.stream(tagInfo.getId(), Duration.ofMillis(100)))
-            )
+                            .map(tagInfo -> session.stream(tagInfo.getId(), Duration.ofMillis(100)))
+                    )
                     .doOnNext(data -> logger.info("{}", data))
                     .limit(1000)
                     .subscribeOn(Schedulers.io())
@@ -419,7 +424,6 @@ public class OpcDaTemplateTest {
         subscriber.assertComplete();
         subscriber.assertValueCount(50);
         subscriber.dispose();
-
     }
 
 
